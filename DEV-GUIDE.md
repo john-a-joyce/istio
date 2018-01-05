@@ -207,7 +207,7 @@ artifacts if you pass a special environment variable:
 env REFRESH_GOLDEN=true make pilot-test
 ```
 
-*Note:* It may be necessary to setup the necessary client configuration files in your environment
+*Note:* It may be necessary to setup the client configuration files in your environment via a sym link
 
 ```shell
 make kubelink
