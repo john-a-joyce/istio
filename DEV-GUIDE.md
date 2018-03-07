@@ -340,6 +340,12 @@ artifacts if you pass a special environment variable:
 env REFRESH_GOLDEN=true make pilot-test
 ```
 
+*Note:* It may be necessary to setup the client configuration files in your environment via a sym link
+
+```shell
+make kubelink
+```
+
 ### Getting coverage numbers
 
 You can get the current unit test coverage numbers on your local repo by going to the top of the repo and entering:
