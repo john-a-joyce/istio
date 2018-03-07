@@ -60,7 +60,7 @@ func init() {
 	flag.BoolVar(&defaultConfig.CheckLogs, "logs", defaultConfig.CheckLogs,
 		"Validate pod logs (expensive in long-running tests)")
 
-	flag.StringVar(&defaultConfig.KubeConfig, "kubeconfig", defaultConfig.KubeConfig,
+	flag.StringVar(&defaultConfig.KubeConfig[0], "kubeconfig", defaultConfig.KubeConfig[0],
 		"kube config file (missing or empty file makes the test use in-cluster kube config instead)")
 	flag.IntVar(&defaultConfig.TestCount, "count", defaultConfig.TestCount, "Number of times to run each test")
 	flag.StringVar(&authmode, "auth", string(authModeBoth),
@@ -77,6 +77,8 @@ func init() {
 	flag.StringVar(&defaultConfig.SelectedTest, "testtype", defaultConfig.SelectedTest,
 		"Select test to run (default is all tests)")
 
+	flag.StringVar(&defaultConfig.ClusterRegistriesDir, "cluster-registry-dir", defaultConfig.ClusterRegistriesDir,
+		"Directory name for the Cluster registry config")
 	flag.BoolVar(&defaultConfig.UseAutomaticInjection, "use-sidecar-injector", defaultConfig.UseAutomaticInjection,
 		"Use automatic sidecar injector")
 	flag.BoolVar(&defaultConfig.UseAdmissionWebhook, "use-admission-webhook", defaultConfig.UseAdmissionWebhook,
@@ -111,9 +113,9 @@ func TestPilot(t *testing.T) {
 		defaultConfig.Verbosity = 3
 	}
 
-	// Only run the tests if the user has defined the KUBECONFIG environment variable.
-	if defaultConfig.KubeConfig == "" {
-		t.Skip("Env variable KUBECONFIG not set. Skipping tests")
+	// Only run the tests if the user has defined the KUBECONFIG environment variable or a cluster registry directory
+	if defaultConfig.KubeConfig[0] == "" && defaultConfig.ClusterRegistriesDir == "" {
+		t.Skip("Neither Env variable KUBECONFIG nor ClusterRegistry set. Skipping tests")
 	}
 
 	if defaultConfig.Hub == "" {
@@ -127,6 +129,10 @@ func TestPilot(t *testing.T) {
 	if defaultConfig.Namespace != "" && authMode(authmode) == authModeBoth {
 		t.Skipf("When namespace(=%s) is specified, auth mode(=%s) must be one of enable or disable. Skipping tests.",
 			defaultConfig.Namespace, authmode)
+	}
+
+	if defaultConfig.UseAutomaticInjection && defaultConfig.ClusterRegistriesDir == "" {
+		t.Skip("Automatic injection on the remote cluster is not supported")
 	}
 
 	noAuthInfra := defaultConfig
@@ -156,9 +162,10 @@ func doTest(testName string, config *tutil.Infra, t *testing.T) {
 			&tcp{Infra: config},
 			&headless{Infra: config},
 			&ingress{Infra: config},
-			&egressRules{Infra: config},
+			// &egressRules{Infra: config},
 			&routing{Infra: config},
-			&routingToEgress{Infra: config},
+			// &routingToEgress{Infra: config},
+			// &multicluster{Infra: config},
 			&zipkin{Infra: config},
 			&authExclusion{Infra: config},
 			&kubernetesExternalNameServices{Infra: config},
