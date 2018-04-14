@@ -530,8 +530,14 @@ func (k *KubeInfo) deployIstio() error {
 	}
 
 	if *multiClusterDir != "" {
+		//create namespace on any remote clusters
 		if err := util.CreateNamespace(k.Namespace, k.RemoteKubeConfig); err != nil {
 			log.Errorf("Unable to create namespace %s on remote cluster: %s", k.Namespace, err.Error())
+			return err
+		}
+		// create the secrets and configmap to start pilot
+		if err := createMultiClusterSecrets(k.Namespace, k.KubeClient, k.RemoteKubeConfig); err != nil {
+			log.Errorf("Unable to create secrets on local cluster %s", k.Namespace, err.Error())
 			return err
 		}
 	}

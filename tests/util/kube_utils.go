@@ -34,6 +34,12 @@ import (
 	"golang.org/x/net/context/ctxhttp"
 
 	"istio.io/istio/pkg/log"
+	"k8s.io/client-go/kubernetes"
+
+	"k8s.io/cluster-registry/pkg/apis/clusterregistry/v1alpha1"
+
+	"k8s.io/api/core/v1"
+	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -611,3 +617,98 @@ func GetKubeConfig(filename string) error {
 	log.Infof("kubeconfig file %s created\n", filename)
 	return nil
 }
+
+// createMultiClusterSecrets will create the secrets and configmap associated with the remote cluster
+func CreateMultiClusterSecrets(namespace string, KubeClient kubernetes.Interface, RemoteKubeConfig string) error {
+	const (
+		secretName= "remote-cluster"
+		configMapName= "remote-cluster"
+	)
+	_, err := ShellMuteOutput("kubectl create secret generic %s --from-file %s -n %s", secretName, RemoteKubeConfig, namespace)
+	if err != nil {
+		return err
+	}
+	log.Infof("Secret remote-cluster created\n")
+	remoteCluster := &v1.ConfigMap{
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name:      configMapName,
+			Namespace: namespace,
+		},
+	}
+	remoteCluster.Data = ????
+
+	remoteCluster_jaj := v1alpha1.Cluster{
+		TypeMeta: meta_v1.TypeMeta{
+			Kind:       "Cluster",
+			APIVersion: "clusterregistry.k8s.io/v1alpha1",
+		},
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name:      "remote-cluster",
+			Namespace: namespace,
+			Annotations: map[string]string{"config.istio.io/accessConfigSecret": secretName,
+				"config.istio.io/accessConfigSecretNamespace": namespace,
+				"config.istio.io/pilotEndpoint": "from configfile",
+				"config.istio.io/platform": "Kubernetes"},
+			ClusterName: "",
+		},
+		Spec: v1alpha1.ClusterSpec{
+			KubernetesAPIEndpoints: v1alpha1.KubernetesAPIEndpoints{
+				ServerEndpoints: nil,
+				CABundle:        nil,
+			},
+			AuthInfo: v1alpha1.AuthInfo{
+				Providers: nil,
+			},
+			CloudProvider: &v1alpha1.CloudProvider{
+				Name: "",
+			},
+		},
+		Status: &v1alpha1.ClusterStatus{},
+	}
+	_, err = KubeClient.CoreV1().ConfigMaps(namespace).Create(remoteCluster)
+	if err != nil {
+		return err
+	}
+	log.Infof("Configmap created\n")
+	return nil
+}
+
+/*	JAJ
+	if _, err := KubeClient.CoreV1().ConfigMaps(namespace).Create(&v1.ConfigMap(
+		v1alpha1.Cluster{
+			TypeMeta: meta_v1.TypeMeta{
+				Kind:       "Cluster",
+				APIVersion: "clusterregistry.k8s.io/v1alpha1",
+			},
+			ObjectMeta: meta_v1.ObjectMeta{
+				Name:            "remote-cluster",
+				Namespace:       namespace,
+				Annotations:     map[string]string {"config.istio.io/accessConfigSecret":secretName,
+					"config.istio.io/accessConfigSecretNamespace":namespace,
+					"config.istio.io/pilotEndpoint":"from configfile",
+					"config.istio.io/platform":"Kubernetes"},
+				ClusterName: "",
+			},
+			Spec: v1alpha1.ClusterSpec{
+				KubernetesAPIEndpoints: v1alpha1.KubernetesAPIEndpoints{
+					ServerEndpoints: nil,
+					CABundle:        nil,
+				},
+				AuthInfo: v1alpha1.AuthInfo{
+					Providers: nil,
+				},
+				CloudProvider: &v1alpha1.CloudProvider{
+					Name: "",
+				},
+			},
+			Status: &v1alpha1.ClusterStatus{},
+		}); err != nil {
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	log.Infof("Configmap created\n")
+	return nil
+}
+*/
