@@ -19,12 +19,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"istio.io/istio/pkg/log"
-	"k8s.io/client-go/kubernetes"
-	"time"
 )
 
 func getKubeConfigFromFile(dirname string) (string, error) {
@@ -50,94 +45,4 @@ func getKubeConfigFromFile(dirname string) (string, error) {
 		return "", nil
 	}
 	return remoteKube, nil
-}
-
-// createMultiClusterSecrets will create the secrets and configmap associated with the remote cluster
-func createMultiClusterSecrets(namespace string, KubeClient kubernetes.Interface, RemoteKubeConfig string) (error) {
-	_, err := ShellMuteOutput("kubectl config view --raw=true --minify=true > %s", filename)
-	if err != nil {
-		return err
-	}
-	log.Infof("kubeconfig file %s created\n", filename)
-	return nil
-
-
-	if _, err := KubeClient.CoreV1().ConfigMaps(namespace).Create(&v1.ConfigMap{
-		ObjectMeta: meta_v1.ObjectMeta{
-			Name: "istio-inject",
-		},
-		Data: map[string]string{
-			"config": string(configData),
-		},
-	}); err != nil {
-		return err
-	}
-	if _, err := KubeClient.CoreV1().Secrets(namespace).Create(&v1.Secret{
-		TypeMeta: meta_v1.TypeMeta{
-			Kind:       "",
-			APIVersion: "",
-		},
-		ObjectMeta: meta_v1.ObjectMeta{
-			Name:            "",
-			GenerateName:    "",
-			Namespace:       "",
-			SelfLink:        "",
-			UID:             "",
-			ResourceVersion: "",
-			Generation:      0,
-			CreationTimestamp: meta_v1.Time{
-				Time: time.Time{},
-			},
-			DeletionTimestamp: &meta_v1.Time{
-				Time: time.Time{},
-			},
-			DeletionGracePeriodSeconds: nil,
-			Labels:                     nil,
-			Annotations:                nil,
-			OwnerReferences:            nil,
-			Initializers: &meta_v1.Initializers{
-				Pending: nil,
-				Result: &meta_v1.Status{
-					TypeMeta: meta_v1.TypeMeta{
-						Kind:       "",
-						APIVersion: "",
-					},
-					ListMeta: meta_v1.ListMeta{
-						SelfLink:        "",
-						ResourceVersion: "",
-						Continue:        "",
-					},
-					Status:  "",
-					Message: "",
-					Reason:  "",
-					Details: &meta_v1.StatusDetails{
-						Name:              "",
-						Group:             "",
-						Kind:              "",
-						UID:               "",
-						Causes:            nil,
-						RetryAfterSeconds: 0,
-					},
-					Code: 0,
-				},
-			},
-			Finalizers:  nil,
-			ClusterName: "",
-		},
-		Data:       nil,
-		StringData: nil,
-		Type:       "",
-	}); err != nil {
-
-	}
-	if _, err = KubeClient.CoreV1().ConfigMaps(e.Config.IstioNamespace).Create(&v1.ConfigMap{
-
-		ObjectMeta: meta_v1.ObjectMeta{
-			Name: "multicluster",
-		},
-		Data: configData,
-	}); err != nil {
-		return err
-	}
-}
 }

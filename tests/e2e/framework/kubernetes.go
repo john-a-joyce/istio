@@ -536,8 +536,8 @@ func (k *KubeInfo) deployIstio() error {
 			return err
 		}
 		// create the secrets and configmap to start pilot
-		if err := createMultiClusterSecrets(k.Namespace, k.KubeClient, k.RemoteKubeConfig); err != nil {
-			log.Errorf("Unable to create secrets on local cluster %s", k.Namespace, err.Error())
+		if err := util.CreateMultiClusterSecrets(k.Namespace, k.KubeClient, k.RemoteKubeConfig); err != nil {
+			log.Errorf("Unable to create secrets on local cluster %s", err.Error())
 			return err
 		}
 	}

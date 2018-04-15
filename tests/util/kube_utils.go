@@ -29,17 +29,16 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/ghodss/yaml"
 	"github.com/golang/sync/errgroup"
 	multierror "github.com/hashicorp/go-multierror"
 	"golang.org/x/net/context/ctxhttp"
-
-	"istio.io/istio/pkg/log"
-	"k8s.io/client-go/kubernetes"
-
-	"k8s.io/cluster-registry/pkg/apis/clusterregistry/v1alpha1"
-
 	"k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/cluster-registry/pkg/apis/clusterregistry/v1alpha1"
+
+	"istio.io/istio/pkg/log"
 )
 
 const (
@@ -618,13 +617,15 @@ func GetKubeConfig(filename string) error {
 	return nil
 }
 
-// createMultiClusterSecrets will create the secrets and configmap associated with the remote cluster
+// CreateMultiClusterSecrets will create the secrets and configmap associated with the remote cluster
 func CreateMultiClusterSecrets(namespace string, KubeClient kubernetes.Interface, RemoteKubeConfig string) error {
 	const (
-		secretName= "remote-cluster"
-		configMapName= "remote-cluster"
+		secretName    = "remote-cluster"
+		configMapName = "clusterregistry"
 	)
 	_, err := ShellMuteOutput("kubectl create secret generic %s --from-file %s -n %s", secretName, RemoteKubeConfig, namespace)
+	// The cluster name is derived from the filename used to create the secret we will need it for the configmap
+	filename := filepath.Base(RemoteKubeConfig)
 	if err != nil {
 		return err
 	}
@@ -635,20 +636,20 @@ func CreateMultiClusterSecrets(namespace string, KubeClient kubernetes.Interface
 			Namespace: namespace,
 		},
 	}
-	remoteCluster.Data = ????
 
-	remoteCluster_jaj := v1alpha1.Cluster{
+	remoteClusterData := v1alpha1.Cluster{
 		TypeMeta: meta_v1.TypeMeta{
 			Kind:       "Cluster",
 			APIVersion: "clusterregistry.k8s.io/v1alpha1",
 		},
 		ObjectMeta: meta_v1.ObjectMeta{
-			Name:      "remote-cluster",
+			Name:      secretName,
 			Namespace: namespace,
 			Annotations: map[string]string{"config.istio.io/accessConfigSecret": secretName,
 				"config.istio.io/accessConfigSecretNamespace": namespace,
-				"config.istio.io/pilotEndpoint": "from configfile",
-				"config.istio.io/platform": "Kubernetes"},
+				"config.istio.io/pilotEndpoint":               "TODO - will be removed from Pilot",
+				"config.istio.io/pilotCfgStore":               "False",
+				"config.istio.io/platform":                    "Kubernetes"},
 			ClusterName: "",
 		},
 		Spec: v1alpha1.ClusterSpec{
@@ -665,6 +666,16 @@ func CreateMultiClusterSecrets(namespace string, KubeClient kubernetes.Interface
 		},
 		Status: &v1alpha1.ClusterStatus{},
 	}
+
+	dataBytes, err1 := yaml.Marshal(remoteClusterData)
+	if err1 != nil {
+		return err1
+	}
+
+	data := map[string]string{}
+	data[filename] = string(dataBytes)
+	remoteCluster.Data = data
+
 	_, err = KubeClient.CoreV1().ConfigMaps(namespace).Create(remoteCluster)
 	if err != nil {
 		return err
@@ -672,43 +683,3 @@ func CreateMultiClusterSecrets(namespace string, KubeClient kubernetes.Interface
 	log.Infof("Configmap created\n")
 	return nil
 }
-
-/*	JAJ
-	if _, err := KubeClient.CoreV1().ConfigMaps(namespace).Create(&v1.ConfigMap(
-		v1alpha1.Cluster{
-			TypeMeta: meta_v1.TypeMeta{
-				Kind:       "Cluster",
-				APIVersion: "clusterregistry.k8s.io/v1alpha1",
-			},
-			ObjectMeta: meta_v1.ObjectMeta{
-				Name:            "remote-cluster",
-				Namespace:       namespace,
-				Annotations:     map[string]string {"config.istio.io/accessConfigSecret":secretName,
-					"config.istio.io/accessConfigSecretNamespace":namespace,
-					"config.istio.io/pilotEndpoint":"from configfile",
-					"config.istio.io/platform":"Kubernetes"},
-				ClusterName: "",
-			},
-			Spec: v1alpha1.ClusterSpec{
-				KubernetesAPIEndpoints: v1alpha1.KubernetesAPIEndpoints{
-					ServerEndpoints: nil,
-					CABundle:        nil,
-				},
-				AuthInfo: v1alpha1.AuthInfo{
-					Providers: nil,
-				},
-				CloudProvider: &v1alpha1.CloudProvider{
-					Name: "",
-				},
-			},
-			Status: &v1alpha1.ClusterStatus{},
-		}); err != nil {
-		return err
-	}
-	if err != nil {
-		return err
-	}
-	log.Infof("Configmap created\n")
-	return nil
-}
-*/
