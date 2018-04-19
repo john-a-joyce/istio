@@ -22,14 +22,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gogo/googleapis/google/rpc"
 	"google.golang.org/grpc"
 
 	mixerpb "istio.io/api/mixer/v1"
-	rpc "istio.io/gogo-genproto/googleapis/google/rpc"
 	"istio.io/istio/mixer/pkg/adapter"
 	"istio.io/istio/mixer/pkg/attribute"
 	"istio.io/istio/mixer/pkg/pool"
-	"istio.io/istio/mixer/pkg/runtime"
+	"istio.io/istio/mixer/pkg/runtime/dispatcher"
 	"istio.io/istio/mixer/pkg/status"
 	"istio.io/istio/pkg/log"
 )
@@ -38,7 +38,7 @@ type preprocCallback func(ctx context.Context, requestBag attribute.Bag, respons
 type checkCallback func(ctx context.Context, requestBag attribute.Bag) (*adapter.CheckResult, error)
 type reportCallback func(ctx context.Context, requestBag attribute.Bag) error
 type quotaCallback func(ctx context.Context, requestBag attribute.Bag,
-	qma *runtime.QuotaMethodArgs) (*adapter.QuotaResult, error)
+	qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error)
 
 type testState struct {
 	client     mixerpb.MixerClient
@@ -138,7 +138,7 @@ func (ts *testState) Report(ctx context.Context, bag attribute.Bag) error {
 }
 
 func (ts *testState) Quota(ctx context.Context, bag attribute.Bag,
-	qma *runtime.QuotaMethodArgs) (*adapter.QuotaResult, error) {
+	qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error) {
 
 	return ts.quota(ctx, bag, qma)
 }
@@ -160,7 +160,7 @@ func TestCheck(t *testing.T) {
 		}, nil
 	}
 
-	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *runtime.QuotaMethodArgs) (*adapter.QuotaResult, error) {
+	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error) {
 		return &adapter.QuotaResult{
 			Amount: 42,
 		}, nil
@@ -192,7 +192,39 @@ func TestCheck(t *testing.T) {
 		t.Errorf("Got %v granted amount, expecting 0", response.Quotas["RequestCount"].GrantedAmount)
 	}
 
-	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *runtime.QuotaMethodArgs) (*adapter.QuotaResult, error) {
+	ts.check = func(ctx context.Context, requestBag attribute.Bag) (*adapter.CheckResult, error) {
+		// simulate an error condition
+		return nil, errors.New("BAD")
+	}
+
+	_, err = ts.client.Check(context.Background(), &request)
+	if err == nil {
+		t.Error("Got success, expecting failure")
+	}
+
+	ts.check = func(ctx context.Context, requestBag attribute.Bag) (*adapter.CheckResult, error) {
+		// simulate a "no check performed" condition
+		return nil, nil
+	}
+
+	response, err = ts.client.Check(context.Background(), &request)
+	if response == nil {
+		t.Errorf("Got no response, expecting one")
+	} else if !status.IsOK(response.Precondition.Status) {
+		t.Errorf("Got status=%v, expecting OK", response.Precondition.Status)
+	}
+
+	if err != nil {
+		t.Errorf("Got %v, expecting success", err)
+	}
+
+	ts.check = func(ctx context.Context, requestBag attribute.Bag) (*adapter.CheckResult, error) {
+		return &adapter.CheckResult{
+			Status: status.WithPermissionDenied("Not Implemented"),
+		}, nil
+	}
+
+	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error) {
 		return &adapter.QuotaResult{
 			Status: status.WithPermissionDenied("Not Implemented"),
 		}, nil
@@ -205,15 +237,11 @@ func TestCheck(t *testing.T) {
 	}
 
 	ts.preproc = func(ctx context.Context, requestBag attribute.Bag, responseBag *attribute.MutableBag) error {
-		responseBag.Set("A1", "override")
 		responseBag.Set("genAttrGen", "genAttrGenValue")
 		return nil
 	}
 
 	ts.check = func(ctx context.Context, requestBag attribute.Bag) (*adapter.CheckResult, error) {
-		if val, _ := requestBag.Get("A1"); val == "override" {
-			return nil, errors.New("attribute overriding not allowed in Check")
-		}
 		if val, _ := requestBag.Get("genAttrGen"); val != "genAttrGenValue" {
 			return nil, errors.New("generated attribute via preproc not part of check attributes")
 		}
@@ -239,7 +267,7 @@ func TestCheckQuota(t *testing.T) {
 		}, nil
 	}
 
-	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *runtime.QuotaMethodArgs) (*adapter.QuotaResult, error) {
+	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error) {
 		return &adapter.QuotaResult{
 			Amount: 42,
 		}, nil
@@ -268,7 +296,7 @@ func TestCheckQuota(t *testing.T) {
 		t.Errorf("Got %v granted amount, expecting 42", response.Quotas["RequestCount"].GrantedAmount)
 	}
 
-	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *runtime.QuotaMethodArgs) (*adapter.QuotaResult, error) {
+	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error) {
 		return &adapter.QuotaResult{
 			Status: status.WithPermissionDenied("Not Implemented"),
 		}, nil
@@ -278,6 +306,33 @@ func TestCheckQuota(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("Got %v, expected success", err)
+	}
+
+	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error) {
+		// simulate an error condition
+		return nil, errors.New("BAD")
+	}
+
+	_, err = ts.client.Check(context.Background(), &request)
+	if err != nil {
+		// errors in the quota path are absorbed by Mixer
+		t.Errorf("Got %v, expecting success", err)
+	}
+
+	ts.quota = func(ctx context.Context, requestBag attribute.Bag, qma *dispatcher.QuotaMethodArgs) (*adapter.QuotaResult, error) {
+		// simulate an "no quotas applied" condition
+		return nil, nil
+	}
+
+	response, err = ts.client.Check(context.Background(), &request)
+	if response == nil {
+		t.Errorf("Got no response, expecting one")
+	} else if !status.IsOK(response.Precondition.Status) {
+		t.Errorf("Got status=%v, expecting OK", response.Precondition.Status)
+	}
+
+	if err != nil {
+		t.Errorf("Got %v, expecting success", err)
 	}
 }
 
@@ -292,7 +347,13 @@ func TestReport(t *testing.T) {
 		return nil
 	}
 
-	request := mixerpb.ReportRequest{Attributes: []mixerpb.CompressedAttributes{{}}}
+	request := mixerpb.ReportRequest{Attributes: []mixerpb.CompressedAttributes{}}
+	_, err = ts.client.Report(context.Background(), &request)
+	if err != nil {
+		t.Errorf("Expected success, got error: %v", err)
+	}
+
+	request = mixerpb.ReportRequest{Attributes: []mixerpb.CompressedAttributes{{}}}
 	_, err = ts.client.Report(context.Background(), &request)
 	if err != nil {
 		t.Errorf("Expected success, got error: %v", err)
@@ -371,15 +432,11 @@ func TestReport(t *testing.T) {
 	}
 
 	ts.preproc = func(ctx context.Context, requestBag attribute.Bag, responseBag *attribute.MutableBag) error {
-		responseBag.Set("A1", "override")
 		responseBag.Set("genAttrGen", "genAttrGenValue")
 		return nil
 	}
 
 	ts.report = func(ctx context.Context, requestBag attribute.Bag) error {
-		if val, _ := requestBag.Get("A1"); val == "override" {
-			return errors.New("attribute overriding NOT allowed in Report")
-		}
 		if val, _ := requestBag.Get("genAttrGen"); val != "genAttrGenValue" {
 			return errors.New("generated attribute via preproc not part of report attributes")
 		}
@@ -388,6 +445,18 @@ func TestReport(t *testing.T) {
 
 	if _, err = ts.client.Report(context.Background(), &request); err != nil {
 		t.Errorf("Got unexpected error: %v", err)
+	}
+
+	badAttr := mixerpb.CompressedAttributes{
+		Words: []string{"A4"},
+		Int64S: map[int32]int64{
+			4646464: 31415692,
+		},
+	}
+
+	request = mixerpb.ReportRequest{Attributes: []mixerpb.CompressedAttributes{attr0, badAttr}}
+	if _, err = ts.client.Report(context.Background(), &request); err == nil {
+		t.Errorf("Got success, expected failure")
 	}
 }
 

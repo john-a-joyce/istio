@@ -14,9 +14,6 @@
 
 .PHONY: docker
 
-# scratch dir base
-ISTIO_DOCKER_BASE:=${ISTIO_OUT}/docker_scratch
-
 # Docker target will build the go binaries and package the docker for local testing.
 # It does not upload to a registry.
 docker: build test-bins docker.all
@@ -81,58 +78,70 @@ DOCKER_FILES_FROM_SOURCE:=pilot/docker/prepare_proxy.sh docker/ca-certificates.t
 $(foreach FILE,$(DOCKER_FILES_FROM_SOURCE), \
         $(eval $(ISTIO_DOCKER)/$(notdir $(FILE)): $(FILE) | $(ISTIO_DOCKER); cp $(FILE) $$(@D)))
 
-# Copy the envoy images, but use standard file names (without the version) in docker
-$(ISTIO_DOCKER)/envoy: ${ISTIO_ENVOY_RELEASE_PATH} | $(ISTIO_DOCKER); cp ${ISTIO_ENVOY_RELEASE_PATH} $(ISTIO_DOCKER)/envoy
-$(ISTIO_DOCKER)/envoy-debug: ${ISTIO_ENVOY_DEBUG_PATH} | $(ISTIO_DOCKER); cp ${ISTIO_ENVOY_DEBUG_PATH} $(ISTIO_DOCKER)/envoy-debug
-
-# pilot docker images
+# pilot docker imagesDOCKER_BUILD_TOP
 
 docker.eurekamirror: $(ISTIO_DOCKER)/pilot-test-eurekamirror
 docker.proxy_init: $(ISTIO_DOCKER)/prepare_proxy.sh
 docker.sidecar_injector: $(ISTIO_DOCKER)/sidecar-injector
 
-docker.proxy: tools/deb/envoy_bootstrap_tmpl.json ${PROXY_JSON_FILES}
-docker.proxy: $(ISTIO_OUT)/envoy
-docker.proxy: $(ISTIO_OUT)/pilot-agent
-docker.proxy: pilot/docker/Dockerfile.proxy pilot/docker/Dockerfile.proxy_debug
-	mkdir -p $(ISTIO_DOCKER_BASE)/proxy
-	cp $^ $(ISTIO_DOCKER_BASE)/proxy/
-ifeq ($(DEBUG_IMAGE),1)
-	time (cd $(ISTIO_DOCKER_BASE)/proxy && \
-		docker build -t $(HUB)/proxy:$(TAG) -f Dockerfile.proxy_debug .)
-else
-	time (cd $(ISTIO_DOCKER_BASE)/proxy && \
+docker.proxy: tools/deb/envoy_bootstrap_tmpl.json
+docker.proxy: ${ISTIO_ENVOY_RELEASE_PATH}
+docker.proxy: $(ISTIO_OUT)/pilot-agent ${PROXY_JSON_FILES}
+docker.proxy: pilot/docker/Dockerfile.proxy
+	mkdir -p $(DOCKER_BUILD_TOP)/proxy
+	# Not using $^ to avoid 2 copies of envoy
+	cp tools/deb/envoy_bootstrap_tmpl.json $(ISTIO_OUT)/pilot-agent ${PROXY_JSON_FILES} pilot/docker/Dockerfile.proxy $(DOCKER_BUILD_TOP)/proxy/
+	cp ${ISTIO_ENVOY_RELEASE_PATH} $(DOCKER_BUILD_TOP)/proxy/envoy
+	time (cd $(DOCKER_BUILD_TOP)/proxy && \
 		docker build -t $(HUB)/proxy:$(TAG) -f Dockerfile.proxy .)
-endif
 
 docker.proxy_debug: tools/deb/envoy_bootstrap_tmpl.json
 docker.proxy_debug: ${ISTIO_ENVOY_DEBUG_PATH}
 docker.proxy_debug: $(ISTIO_OUT)/pilot-agent ${PROXY_JSON_FILES}
 docker.proxy_debug: pilot/docker/Dockerfile.proxy_debug
-	mkdir -p $(ISTIO_DOCKER_BASE)/proxyd
-	cp  ${ISTIO_ENVOY_DEBUG_PATH} $(ISTIO_DOCKER_BASE)/proxyd/envoy
-	cp  tools/deb/envoy_bootstrap_tmpl.json ${PROXY_JSON_FILES} $(ISTIO_OUT)/pilot-agent pilot/docker/Dockerfile.proxy_debug $(ISTIO_DOCKER_BASE)/proxyd/
-	time (cd $(ISTIO_DOCKER_BASE)/proxyd && \
+	mkdir -p $(DOCKER_BUILD_TOP)/proxyd
+	cp ${ISTIO_ENVOY_DEBUG_PATH} $(DOCKER_BUILD_TOP)/proxyd/envoy
+	# Not using $^ to avoid 2 copies of envoy
+	cp tools/deb/envoy_bootstrap_tmpl.json $(ISTIO_OUT)/pilot-agent ${PROXY_JSON_FILES} pilot/docker/Dockerfile.proxy_debug $(DOCKER_BUILD_TOP)/proxyd/
+	time (cd $(DOCKER_BUILD_TOP)/proxyd && \
 		docker build -t $(HUB)/proxy_debug:$(TAG) -f Dockerfile.proxy_debug .)
 
+# Target to build a proxy image with v2 interfaces enabled. Partial implementation, but
+# will scale better and have v2-specific features. Not built automatically until it passes
+# all tests. Developers working on v2 are currently expected to call this manually as
+# make docker.proxyv2; docker push ${HUB}/proxy:${TAG}
+docker.proxyv2: tools/deb/envoy_bootstrap_v2.json ${PROXY_JSON_FILES}
+docker.proxyv2: ${ISTIO_ENVOY_RELEASE_PATH}
+docker.proxyv2: $(ISTIO_OUT)/pilot-agent
+docker.proxyv2: pilot/docker/Dockerfile.proxy pilot/docker/Dockerfile.proxy_debug
+	mkdir -p $(DOCKER_BUILD_TOP)/proxyv2
+	# Not using $^ to avoid 2 copies of envoy
+	cp ${PROXY_JSON_FILES} $(ISTIO_OUT)/pilot-agent \
+		pilot/docker/Dockerfile.proxy_debug $(DOCKER_BUILD_TOP)/proxyv2/
+	cp ${ISTIO_ENVOY_RELEASE_PATH} $(DOCKER_BUILD_TOP)/proxyv2/envoy
+	# Use v2 as default
+	cp tools/deb/envoy_bootstrap_v2.json $(DOCKER_BUILD_TOP)/proxyv2/envoy_bootstrap_tmpl.json
+	time (cd $(DOCKER_BUILD_TOP)/proxyv2 && \
+		docker build -t $(HUB)/proxyv2:$(TAG) -f Dockerfile.proxy_debug .)
+
 docker.pilot: $(ISTIO_OUT)/pilot-discovery pilot/docker/Dockerfile.pilot
-	mkdir -p $(ISTIO_DOCKER_BASE)/pilot
-	cp $^ $(ISTIO_DOCKER_BASE)/pilot/
-	time (cd $(ISTIO_DOCKER_BASE)/pilot && \
+	mkdir -p $(ISTIO_DOCKER)/pilot
+	cp $^ $(ISTIO_DOCKER)/pilot/
+	time (cd $(ISTIO_DOCKER)/pilot && \
 		docker build -t $(HUB)/pilot:$(TAG) -f Dockerfile.pilot .)
 
 # Test app for pilot integration
 docker.app: $(ISTIO_OUT)/pilot-test-client $(ISTIO_OUT)/pilot-test-server \
 			pilot/docker/certs/cert.crt pilot/docker/certs/cert.key pilot/docker/Dockerfile.app
-	mkdir -p $(ISTIO_DOCKER_BASE)/pilotapp
-	cp $^ $(ISTIO_DOCKER_BASE)/pilotapp
+	mkdir -p $(ISTIO_DOCKER)/pilotapp
+	cp $^ $(ISTIO_DOCKER)/pilotapp
 ifeq ($(DEBUG_IMAGE),1)
 	# It is extremely helpful to debug from the test app. The savings in size are not worth the
 	# developer pain
-	cp $(ISTIO_DOCKER_BASE)/pilotapp/Dockerfile.app $(ISTIO_DOCKER_BASE)/pilotapp/Dockerfile.appdbg
-	sed -e "s,FROM scratch,FROM $(HUB)/proxy_debug:$(TAG)," $(ISTIO_DOCKER_BASE)/pilotapp/Dockerfile.appdbg > $(ISTIO_DOCKER_BASE)/pilotapp/Dockerfile.appd
+	cp $(ISTIO_DOCKER)/pilotapp/Dockerfile.app $(ISTIO_DOCKER)/pilotapp/Dockerfile.appdbg
+	sed -e "s,FROM scratch,FROM $(HUB)/proxy_debug:$(TAG)," $(ISTIO_DOCKER)/pilotapp/Dockerfile.appdbg > $(ISTIO_DOCKER)/pilotapp/Dockerfile.appd
 endif
-	time (cd $(ISTIO_DOCKER_BASE)/pilotapp && \
+	time (cd $(ISTIO_DOCKER)/pilotapp && \
 		docker build -t $(HUB)/app:$(TAG) -f Dockerfile.app .)
 
 
@@ -177,7 +186,7 @@ $(foreach FILE,$(GRAFANA_FILES),$(eval docker.grafana: $(ISTIO_DOCKER)/$(notdir 
 docker.grafana: addons/grafana/Dockerfile$$(suffix $$@) $(GRAFANA_FILES) $(ISTIO_DOCKER)/dashboards
 	$(DOCKER_RULE)
 
-DOCKER_TARGETS:=docker.pilot docker.proxy docker.proxy_debug docker.app $(PILOT_DOCKER) $(SERVICEGRAPH_DOCKER) $(MIXER_DOCKER) $(SECURITY_DOCKER) docker.grafana
+DOCKER_TARGETS:=docker.pilot docker.proxy docker.proxy_debug docker.proxyv2 docker.app $(PILOT_DOCKER) $(SERVICEGRAPH_DOCKER) $(MIXER_DOCKER) $(SECURITY_DOCKER) docker.grafana
 
 DOCKER_RULE=time (cp $< $(ISTIO_DOCKER)/ && cd $(ISTIO_DOCKER) && \
             docker build -t $(HUB)/$(subst docker.,,$@):$(TAG) -f Dockerfile$(suffix $@) .)

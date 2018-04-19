@@ -57,14 +57,15 @@ export GOARCH ?= amd64
 
 LOCAL_OS := $(shell uname)
 ifeq ($(LOCAL_OS),Linux)
-   export GOOS ?= linux
+   export GOOS_LOCAL = linux
 else ifeq ($(LOCAL_OS),Darwin)
-   export GOOS ?= darwin
+   export GOOS_LOCAL = darwin
 else
    $(error "This system's OS $(LOCAL_OS) isn't recognized/supported")
    # export GOOS ?= windows
 endif
 
+export GOOS ?= $(GOOS_LOCAL)
 #-----------------------------------------------------------------------------
 # Output control
 #-----------------------------------------------------------------------------
@@ -101,9 +102,16 @@ export ISTIO_BIN=$(GO_TOP)/bin
 # Using same package structure as pkg/
 export OUT_DIR=$(GO_TOP)/out
 export ISTIO_OUT:=$(GO_TOP)/out/$(GOOS)_$(GOARCH)/$(BUILDTYPE_DIR)
+export HELM=$(ISTIO_OUT)/helm
 
 # scratch dir: this shouldn't be simply 'docker' since that's used for docker.save to store tar.gz files
 ISTIO_DOCKER:=${ISTIO_OUT}/docker_temp
+
+# scratch dir for building isolated images. Please don't remove it again - using
+# ISTIO_DOCKER results in slowdown, all files (including multiple copies of envoy) will be
+# copied to the docker temp container - even if you add only a tiny file, >1G of data will
+# be copied, for each docker image.
+DOCKER_BUILD_TOP:=${ISTIO_OUT}/docker_build
 
 # dir where tar.gz files from docker.save are stored
 ISTIO_DOCKER_TAR:=${ISTIO_OUT}/docker
@@ -179,9 +187,16 @@ ${ISTIO_BIN}/have_go_$(GO_VERSION_REQUIRED):
                  then printf "go version $(GO_VERSION_REQUIRED)+ required, found: "; $(GO) version; exit 1; fi
 	@touch ${ISTIO_BIN}/have_go_$(GO_VERSION_REQUIRED)
 
+# Ensure expected GOPATH setup
+.PHONY: check-tree
+check-tree:
+	@if [ "$(ISTIO_GO)" != "$(GO_TOP)/src/istio.io/istio" ]; then \
+       echo Istio not found in GOPATH/src/istio.io. Make sure to clone Istio on that path. $(ISTIO_GO) not under $(GO_TOP) ; \
+       exit 1; fi
+
 # Downloads envoy, based on the SHA defined in the base pilot Dockerfile
 # Will also check vendor, based on Gopkg.lock
-init: submodule vendor.check check-go-version $(ISTIO_OUT)/istio_is_init
+init: check-tree submodule vendor.check check-go-version $(ISTIO_OUT)/istio_is_init
 
 # Marker for whether vendor submodule is here or not already
 GRPC_DIR:=./vendor/google.golang.org/grpc
@@ -209,12 +224,17 @@ pull:
 git.pullmaster:
 	git merge master
 
+# Sync target will pull from master and sync the modules. It is the first step of the
+# circleCI build, developers should call it periodically.
+sync: git.pullmaster submodule-sync init
+	mkdir -p ${OUT_DIR}/logs
+
 .PHONY: submodule pull submodule-sync git.pullmaster
 
 # I tried to make this dependent on what I thought was the appropriate
 # lock file, but it caused the rule for that file to get run (which
 # seems to be about obtaining a new version of the 3rd party libraries).
-$(ISTIO_OUT)/istio_is_init: bin/init.sh pilot/docker/Dockerfile.proxy_debug | ${ISTIO_OUT}
+$(ISTIO_OUT)/istio_is_init: bin/init.sh istio.deps | ${ISTIO_OUT}
 	ISTIO_OUT=${ISTIO_OUT} bin/init.sh
 	touch $(ISTIO_OUT)/istio_is_init
 
@@ -260,7 +280,7 @@ vendor.check:
 .PHONY: vendor.check
 
 ${GEN_CERT}:
-	unset GOOS && unset GOARCH && CGO_ENABLED=1 bin/gobuild.sh $@ istio.io/istio/pkg/version ./security/cmd/generate_cert
+	GOOS=$(GOOS_LOCAL) && unset GOARCH && CGO_ENABLED=1 bin/gobuild.sh $@ istio.io/istio/pkg/version ./security/cmd/generate_cert
 
 #-----------------------------------------------------------------------------
 # Target: precommit
@@ -401,7 +421,7 @@ istioctl-install:
 # Target: test
 #-----------------------------------------------------------------------------
 
-.PHONY: junit-parser test localTestEnv test-bins
+.PHONY: test localTestEnv test-bins
 
 JUNIT_REPORT := $(shell which go-junit-report 2> /dev/null || echo "${ISTIO_BIN}/go-junit-report")
 
@@ -418,7 +438,9 @@ test: | $(JUNIT_REPORT)
 	2>&1 | tee >($(JUNIT_REPORT) > $(JUNIT_UNIT_TEST_XML))
 
 GOTEST_PARALLEL ?= '-test.parallel=4'
-GOTEST_P ?= -p 1
+# This is passed to mixer and other tests to limit how many builds are used.
+# In CircleCI, set in "Project Settings" -> "Environment variables" as "-p 2" if you don't have xlarge machines
+GOTEST_P ?=
 GOSTATIC = -ldflags '-extldflags "-static"'
 
 PILOT_TEST_BINS:=${ISTIO_OUT}/pilot-test-server ${ISTIO_OUT}/pilot-test-client ${ISTIO_OUT}/pilot-test-eurekamirror
@@ -435,12 +457,13 @@ localTestEnv: test-bins
 # https://github.com/istio/istio/issues/2318
 .PHONY: pilot-test
 pilot-test: pilot-agent
-	go test ${GOTEST_P} ${T} ./pilot/...
+	go test -p 1 ${T} ./pilot/...
 
 .PHONY: mixer-test
+MIXER_TEST_T ?= ${T} ${GOTEST_PARALLEL}
 mixer-test: mixs
 	# Some tests use relative path "testdata", must be run from mixer dir
-	(cd mixer; go test ${T} ${GOTEST_PARALLEL} ./...)
+	(cd mixer; go test ${GOTEST_P} ${MIXER_TEST_T} ./...)
 
 .PHONY: broker-test
 broker-test: depend
@@ -504,7 +527,7 @@ racetest: pilot-racetest mixer-racetest security-racetest broker-racetest galley
 
 .PHONY: pilot-racetest
 pilot-racetest: pilot-agent
-	RACE_TEST=true go test ${GOTEST_P} ${T} -race ./pilot/...
+	RACE_TEST=true go test -p 1 ${T} -race ./pilot/...
 
 .PHONY: mixer-racetest
 mixer-racetest: mixs
@@ -521,7 +544,7 @@ galley-racetest: depend
 
 .PHONY: security-racetest
 security-racetest:
-	RACE_TEST=true go test ${T} -race ./security/...
+	RACE_TEST=true go test ${T} -race ./security/pkg/... ./security/cmd/...
 
 .PHONY: common-racetest
 common-racetest:
@@ -567,29 +590,67 @@ artifacts: docker
 # generate_yaml in tests/istio.mk can build without specifying a hub & tag
 installgen:
 	install/updateVersion.sh -a ${HUB},${TAG}
+	$(MAKE) istio.yaml
 
 # A make target to generate all the YAML files
 generate_yaml:
-	./install/updateVersion.sh -a ${HUB},${TAG} >/dev/null 2>&1
+	./install/updateVersion.sh -a ${HUB},${TAG} 
 
 
 istio.yaml:
-	helm template --set global.tag=${TAG} \
+	$(HELM) template --set global.tag=${TAG} \
 				  --namespace=istio-system \
                   --set global.hub=${HUB} \
+                  --set global.controlPlaneSecurityEnabled=false \
+		  --set global.refreshInterval=1s \
+                  --set global.mtls.enabled=false \
+		  --set global.rbacEnabled=true \
+		  --set istiotesting.oneNamespace=false \
                   --set prometheus.enabled=true \
 				install/kubernetes/helm/istio > install/kubernetes/istio.yaml
 
-istio_auth.yaml:
-	helm template --set global.tag=${TAG} \
-		  		  --namespace=istio-system \
+istio-one-namespace.yaml:
+	$(HELM) template --set global.tag=${TAG} \
+				  --namespace=istio-system \
                   --set global.hub=${HUB} \
-	              --set global.mtlsDefault=true \
-			install/kubernetes/helm/istio > install/kubernetes/istio.yaml
+                  --set global.controlPlaneSecurityEnabled=false \
+		  --set global.refreshInterval=1s \
+                  --set global.mtls.enabled=false \
+		  --set global.rbacEnabled=true \
+		  --set istiotesting.oneNamespace=true \
+                  --set prometheus.enabled=true \
+				install/kubernetes/helm/istio > install/kubernetes/istio-one-namespace.yaml
+
+
+istio-auth.yaml:
+	$(HELM) template --set global.tag=${TAG} \
+				  --namespace=istio-system \
+                  --set global.hub=${HUB} \
+                  --set global.controlPlaneSecurityEnabled=true \
+		  --set global.refreshInterval=1s \
+                  --set global.mtls.enabled=true \
+		  --set global.rbacEnabled=true \
+		  --set istiotesting.oneNamespace=false \
+                  --set prometheus.enabled=true \
+				install/kubernetes/helm/istio > install/kubernetes/istio-auth.yaml
+
+istio-one-namespace-auth.yaml:
+	$(HELM) template --set global.tag=${TAG} \
+				  --namespace=istio-system \
+                  --set global.hub=${HUB} \
+                  --set global.controlPlaneSecurityEnabled=true \
+		  --set global.refreshInterval=1s \
+                  --set global.mtls.enabled=true \
+		  --set global.rbacEnabled=true \
+		  --set istiotesting.oneNamespace=true \
+                  --set prometheus.enabled=true \
+				install/kubernetes/helm/istio > install/kubernetes/istio-one-namespace-auth.yaml
+
+
 
 deploy/all:
 	kubectl create ns istio-system > /dev/null || true
-	helm template --set global.tag=${TAG} \
+	$(HELM) template --set global.tag=${TAG} \
 		          --namespace=istio-system \
                   --set global.hub=${HUB} \
 		      	  --set sidecar-injector.enabled=true \

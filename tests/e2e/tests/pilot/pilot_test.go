@@ -67,6 +67,8 @@ func init() {
 
 	flag.BoolVar(&config.UseAutomaticInjection, "use-sidecar-injector", config.UseAutomaticInjection,
 		"Use automatic sidecar injector")
+	flag.StringVar(&config.ClusterRegistriesDir, "cluster-registry-dir", config.ClusterRegistriesDir,
+		"Directory name for the Cluster registry config")
 	flag.BoolVar(&config.UseAdmissionWebhook, "use-admission-webhook", config.UseAdmissionWebhook,
 		"Use k8s external admission webhook for config validation")
 
@@ -99,9 +101,9 @@ func TestPilot(t *testing.T) {
 		config.Verbosity = 3
 	}
 
-	// Only run the tests if the user has defined the KUBECONFIG environment variable.
-	if config.KubeConfig == "" {
-		t.Skip("Env variable KUBECONFIG not set. Skipping tests")
+	// Only run the tests if the user has defined the KUBECONFIG environment variable or a cluster registry directory
+	if config.KubeConfig == "" && config.ClusterRegistriesDir == "" {
+		t.Skip("Neither Env variable KUBECONFIG nor ClusterRegistry set. Skipping tests")
 	}
 
 	if config.Hub == "" {
@@ -128,6 +130,8 @@ func TestPilot(t *testing.T) {
 		&zipkin{Environment: env},
 		&authExclusion{Environment: env},
 		&kubernetesExternalNameServices{Environment: env},
+		&authnPolicy{Environment: env},
+		&istioRBAC{Environment: env},
 	}
 
 	for _, test := range tests {

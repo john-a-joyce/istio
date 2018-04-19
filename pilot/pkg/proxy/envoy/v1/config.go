@@ -28,6 +28,7 @@ import (
 
 	multierror "github.com/hashicorp/go-multierror"
 
+	authn "istio.io/api/authentication/v1alpha1"
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	networking "istio.io/api/networking/v1alpha3"
 	routing "istio.io/api/routing/v1alpha1"
@@ -213,6 +214,10 @@ func buildClusters(env model.Environment, node model.Proxy) (Clusters, error) {
 		clusters = append(clusters, BuildMixerAuthFilterClusters(env.IstioConfigStore, env.Mesh, proxyInstances)...)
 	}
 
+	// append cluster for JwksUri (for Jwt authentication) if necessary.
+	clusters = append(clusters, buildJwksURIClustersForProxyInstances(
+		env.Mesh, env.IstioConfigStore, proxyInstances)...)
+
 	return clusters, nil
 }
 
@@ -292,7 +297,7 @@ func buildSidecarListenersClusters(
 		}
 
 		// only HTTP outbound clusters are needed
-		httpOutbound := buildOutboundHTTPRoutes(mesh, node, proxyInstances, services, config)
+		httpOutbound := buildOutboundHTTPRoutes(node, proxyInstances, services, config)
 		httpOutbound = BuildEgressHTTPRoutes(mesh, node, proxyInstances, config, httpOutbound)
 		httpOutbound = BuildExternalServiceHTTPRoutes(mesh, node, proxyInstances, config, httpOutbound)
 		clusters = append(clusters, httpOutbound.Clusters()...)
@@ -308,6 +313,7 @@ func buildSidecarListenersClusters(
 			direction:        traceOperation,
 			outboundListener: true,
 			store:            config,
+			authnPolicy:      nil, /* authN policy is not needed for outbound listener */
 		}))
 		// TODO: need inbound listeners in HTTP_PROXY case, with dedicated ingress listener.
 	}
@@ -335,7 +341,7 @@ func buildRDSRoute(mesh *meshconfig.MeshConfig, node model.Proxy, routeName stri
 		if err != nil {
 			return nil, err
 		}
-		httpConfigs = buildOutboundHTTPRoutes(mesh, node, proxyInstances, services, config)
+		httpConfigs = buildOutboundHTTPRoutes(node, proxyInstances, services, config)
 		httpConfigs = BuildEgressHTTPRoutes(mesh, node, proxyInstances, config, httpConfigs)
 		httpConfigs = BuildExternalServiceHTTPRoutes(mesh, node, proxyInstances, config, httpConfigs)
 	case model.Router:
@@ -377,6 +383,7 @@ type buildHTTPListenerOpts struct { // nolint: maligned
 	direction        string
 	outboundListener bool
 	store            model.IstioConfigStore
+	authnPolicy      *authn.Policy
 }
 
 // buildHTTPListener constructs a listener for the network interface address and port.
@@ -404,6 +411,10 @@ func buildHTTPListener(opts buildHTTPListenerOpts) *Listener {
 			Config: mixerConfig,
 		}
 		filters = append([]HTTPFilter{filter}, filters...)
+	}
+
+	if filter := buildJwtFilter(opts.authnPolicy); filter != nil {
+		filters = append([]HTTPFilter{*filter}, filters...)
 	}
 
 	config := &HTTPFilterConfig{
@@ -448,28 +459,9 @@ func buildHTTPListener(opts buildHTTPListenerOpts) *Listener {
 	}
 }
 
-// consolidateAuthPolicy returns service auth policy, if it's not INHERIT. Else,
-// returns mesh policy.
-func consolidateAuthPolicy(mesh *meshconfig.MeshConfig, serviceAuthPolicy meshconfig.AuthenticationPolicy) meshconfig.AuthenticationPolicy {
-	if serviceAuthPolicy != meshconfig.AuthenticationPolicy_INHERIT {
-		return serviceAuthPolicy
-	}
-	// TODO: use AuthenticationPolicy for mesh policy and remove this conversion
-	switch mesh.AuthPolicy {
-	case meshconfig.MeshConfig_MUTUAL_TLS:
-		return meshconfig.AuthenticationPolicy_MUTUAL_TLS
-	case meshconfig.MeshConfig_NONE:
-		return meshconfig.AuthenticationPolicy_NONE
-	default:
-		// Never get here, there are no other enum value for mesh.AuthPolicy.
-		panic(fmt.Sprintf("Unknown mesh auth policy: %v\n", mesh.AuthPolicy))
-	}
-}
-
-// mayApplyInboundAuth adds ssl_context to the listener if consolidateAuthPolicy.
-func mayApplyInboundAuth(listener *Listener, mesh *meshconfig.MeshConfig,
-	serviceAuthPolicy meshconfig.AuthenticationPolicy) {
-	if consolidateAuthPolicy(mesh, serviceAuthPolicy) == meshconfig.AuthenticationPolicy_MUTUAL_TLS {
+// mayApplyInboundAuth adds ssl_context to the listener if the given authN policy require TLS.
+func mayApplyInboundAuth(listener *Listener, authenticationPolicy *authn.Policy) {
+	if model.RequireTLS(authenticationPolicy) {
 		listener.SSLContext = buildListenerSSLContext(model.AuthCertsPath)
 	}
 }
@@ -561,7 +553,7 @@ func buildOutboundListeners(mesh *meshconfig.MeshConfig, node model.Proxy, proxy
 	clusters = append(clusters, externalServiceTCPClusters...)
 
 	// note that outbound HTTP routes are supplied through RDS
-	httpOutbound := buildOutboundHTTPRoutes(mesh, node, proxyInstances, services, config)
+	httpOutbound := buildOutboundHTTPRoutes(node, proxyInstances, services, config)
 	httpOutbound = BuildEgressHTTPRoutes(mesh, node, proxyInstances, config, httpOutbound)
 	httpOutbound = BuildExternalServiceHTTPRoutes(mesh, node, proxyInstances, config, httpOutbound)
 
@@ -587,6 +579,7 @@ func buildOutboundListeners(mesh *meshconfig.MeshConfig, node model.Proxy, proxy
 			direction:        operation,
 			outboundListener: true,
 			store:            config,
+			authnPolicy:      nil, /* authn policy is not needed for outbound listener */
 		}))
 		clusters = append(clusters, routeConfig.Clusters()...)
 	}
@@ -613,8 +606,8 @@ func buildDestinationHTTPRoutes(node model.Proxy, service *model.Service,
 		useDefaultRoute := true
 		rules := config.RouteRules(proxyInstances, service.Hostname, node.Domain)
 		// sort for output uniqueness
-		// if v1alpha2 rules are returned, len(rules) <= 1 is guaranteed
-		// because v1alpha2 rules are unique per host.
+		// if v1alpha3 rules are returned, len(rules) <= 1 is guaranteed
+		// because v1alpha3 rules are unique per host.
 		model.SortRouteRules(rules)
 
 		for _, rule := range rules {
@@ -667,7 +660,7 @@ func buildDestinationHTTPRoutes(node model.Proxy, service *model.Service,
 
 // buildOutboundHTTPRoutes creates HTTP route configs indexed by ports for the
 // traffic outbound from the proxy instance
-func buildOutboundHTTPRoutes(_ *meshconfig.MeshConfig, node model.Proxy,
+func buildOutboundHTTPRoutes(node model.Proxy,
 	proxyInstances []*model.ServiceInstance, services []*model.Service, config model.IstioConfigStore) HTTPRouteConfigs {
 	httpConfigs := make(HTTPRouteConfigs)
 	suffix := strings.Split(node.Domain, ".")
@@ -794,6 +787,8 @@ func buildInboundListeners(mesh *meshconfig.MeshConfig, node model.Proxy,
 		protocol := servicePort.Protocol
 		cluster := BuildInboundCluster(endpoint.Port, protocol, mesh.ConnectTimeout)
 		clusters = append(clusters, cluster)
+		authenticationPolicy := model.GetConsolidateAuthenticationPolicy(mesh,
+			config, instance.Service.Hostname, endpoint.ServicePort)
 
 		var listener *Listener
 
@@ -826,8 +821,8 @@ func buildInboundListeners(mesh *meshconfig.MeshConfig, node model.Proxy,
 				rules := config.RouteRulesByDestination(proxyInstances, node.Domain)
 
 				// sort for output uniqueness
-				// if v1alpha2 rules are returned, len(rules) <= 1 is guaranteed
-				// because v1alpha2 rules are unique per host.
+				// if v1alpha3 rules are returned, len(rules) <= 1 is guaranteed
+				// because v1alpha3 rules are unique per host.
 				model.SortRouteRules(rules)
 				for _, config := range rules {
 					switch config.Spec.(type) {
@@ -848,7 +843,7 @@ func buildInboundListeners(mesh *meshconfig.MeshConfig, node model.Proxy,
 						rule := config.Spec.(*networking.VirtualService)
 
 						// if no routes are returned, it is a TCP RouteRule
-						routes := BuildInboundRoutesV2(proxyInstances, config, rule, cluster)
+						routes := BuildInboundRoutesV3(proxyInstances, config, rule, cluster)
 						for _, route := range routes {
 							// set server-side mixer filter config for inbound HTTP routes
 							// Note: websocket routes do not call the filter chain. Will be
@@ -881,6 +876,7 @@ func buildInboundListeners(mesh *meshconfig.MeshConfig, node model.Proxy,
 				direction:        IngressTraceOperation,
 				outboundListener: false,
 				store:            config,
+				authnPolicy:      authenticationPolicy,
 			})
 
 		case model.ProtocolTCP, model.ProtocolHTTPS, model.ProtocolMongo, model.ProtocolRedis:
@@ -903,7 +899,9 @@ func buildInboundListeners(mesh *meshconfig.MeshConfig, node model.Proxy,
 		}
 
 		if listener != nil {
-			mayApplyInboundAuth(listener, mesh, endpoint.ServicePort.AuthenticationPolicy)
+			authenticationPolicy := model.GetConsolidateAuthenticationPolicy(mesh,
+				config, instance.Service.Hostname, endpoint.ServicePort)
+			mayApplyInboundAuth(listener, authenticationPolicy)
 			listeners = append(listeners, listener)
 		}
 	}

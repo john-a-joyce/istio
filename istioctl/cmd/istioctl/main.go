@@ -37,11 +37,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+	// import all known client auth plugins
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/util/homedir"
 
+	"istio.io/istio/istioctl/cmd/istioctl/convert"
 	"istio.io/istio/istioctl/cmd/istioctl/gendeployment"
 	"istio.io/istio/pilot/cmd"
 	"istio.io/istio/pilot/pkg/config/kube/crd"
@@ -100,22 +103,20 @@ See https://istio.io/docs/reference/ for an overview of routing rules
 and destination policies.
 
 `,
-		PersistentPreRun: getRealKubeConfig,
-
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := log.Configure(loggingOptions); err != nil {
 				return err
 			}
+			getRealKubeConfig(cmd, args)
 			defaultNamespace = getDefaultNamespace(kubeconfig)
 			return nil
 		},
 	}
 
 	postCmd = &cobra.Command{
-		Use:              "create",
-		Short:            "Create policies and rules",
-		Example:          "istioctl create -f example-routing.yaml",
-		PersistentPreRun: getRealKubeConfig,
+		Use:     "create",
+		Short:   "Create policies and rules",
+		Example: "istioctl create -f example-routing.yaml",
 		RunE: func(c *cobra.Command, args []string) error {
 			if len(args) != 0 {
 				c.Println(c.UsageString())
@@ -183,10 +184,9 @@ and destination policies.
 	}
 
 	putCmd = &cobra.Command{
-		Use:              "replace",
-		Short:            "Replace existing policies and rules",
-		Example:          "istioctl replace -f example-routing.yaml",
-		PersistentPreRun: getRealKubeConfig,
+		Use:     "replace",
+		Short:   "Replace existing policies and rules",
+		Example: "istioctl replace -f example-routing.yaml",
 		RunE: func(c *cobra.Command, args []string) error {
 			if len(args) != 0 {
 				c.Println(c.UsageString())
@@ -288,7 +288,6 @@ istioctl get destinationpolicies
 # Get a specific rule named productpage-default
 istioctl get routerule productpage-default
 `,
-		PersistentPreRun: getRealKubeConfig,
 		RunE: func(c *cobra.Command, args []string) error {
 			configClient, err := newClient()
 			if err != nil {
@@ -306,15 +305,15 @@ istioctl get routerule productpage-default
 				return err
 			}
 
-			ns, _ := handleNamespaces(v1.NamespaceAll)
 			var configs []model.Config
 			if len(args) > 1 {
+				ns, _ := handleNamespaces(v1.NamespaceAll)
 				config, exists := configClient.Get(typ.Type, args[1], ns)
 				if exists {
 					configs = append(configs, *config)
 				}
 			} else {
-				configs, err = configClient.List(typ.Type, ns)
+				configs, err = configClient.List(typ.Type, namespace)
 				if err != nil {
 					return err
 				}
@@ -349,7 +348,6 @@ istioctl delete -f example-routing.yaml
 # Delete the rule productpage-default
 istioctl delete routerule productpage-default
 `,
-		PersistentPreRun: getRealKubeConfig,
 		RunE: func(c *cobra.Command, args []string) error {
 			configClient, errs := newClient()
 			if errs != nil {
@@ -446,7 +444,6 @@ istioctl delete routerule productpage-default
 		Example: `# Create a config file for the api server.
 istioctl context-create --api-server http://127.0.0.1:8080
 `,
-		PersistentPreRun: getRealKubeConfig,
 		RunE: func(c *cobra.Command, args []string) error {
 			if istioAPIServer == "" {
 				c.Println(c.UsageString())
@@ -499,6 +496,11 @@ istioctl context-create --api-server http://127.0.0.1:8080
 			return nil
 		},
 	}
+
+	experimentalCmd = &cobra.Command{
+		Use:   "experimental",
+		Short: "Experimental commands that may be modified or deprecated",
+	}
 )
 
 const defaultKubeConfigText = "$KUBECONFIG else $HOME/.kube/config"
@@ -540,6 +542,8 @@ func init() {
 	getCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "short",
 		"Output format. One of:yaml|short")
 
+	experimentalCmd.AddCommand(convert.Command())
+
 	// Attach the Istio logging options to the command.
 	loggingOptions.AttachCobraFlags(rootCmd)
 
@@ -552,6 +556,7 @@ func init() {
 	rootCmd.AddCommand(contextCmd)
 	rootCmd.AddCommand(version.CobraCommand())
 	rootCmd.AddCommand(gendeployment.Command(&istioNamespace))
+	rootCmd.AddCommand(experimentalCmd)
 
 	rootCmd.AddCommand(collateral.CobraCommand(rootCmd, &doc.GenManHeader{
 		Title:   "Istio Control",
@@ -670,6 +675,8 @@ func newClient() (*crd.Client, error) {
 		model.EndUserAuthenticationPolicySpec,
 		model.EndUserAuthenticationPolicySpecBinding,
 		model.AuthenticationPolicy,
+		model.ServiceRole,
+		model.ServiceRoleBinding,
 	}, "")
 }
 

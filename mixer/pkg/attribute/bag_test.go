@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -130,9 +129,8 @@ func TestMerge(t *testing.T) {
 	c1.Set("STRING1", "A")
 	c2.Set("STRING2", "B")
 
-	if err := mb.Merge(c1, nil, c2); err != nil {
-		t.Errorf("Got %v, expecting success", err)
-	}
+	mb.Merge(c1)
+	mb.Merge(c2)
 
 	if v, ok := mb.Get("STRING0"); !ok || v.(string) != "@" {
 		t.Errorf("Got %v, expected @", v)
@@ -144,22 +142,6 @@ func TestMerge(t *testing.T) {
 
 	if v, ok := mb.Get("STRING2"); !ok || v.(string) != "B" {
 		t.Errorf("Got %v, expected B", v)
-	}
-}
-
-func TestMergeErrors(t *testing.T) {
-	mb := GetMutableBag(empty)
-
-	c1 := GetMutableBag(mb)
-	c2 := GetMutableBag(mb)
-
-	c1.Set("FOO", "X")
-	c2.Set("FOO", "Y")
-
-	if err := mb.Merge(c1, c2); err == nil {
-		t.Error("Got success, expected failure")
-	} else if !strings.Contains(err.Error(), "FOO") {
-		t.Errorf("Expected error to contain the word FOO, got %s", err.Error())
 	}
 }
 
@@ -729,7 +711,7 @@ func TestReferenceTracking(t *testing.T) {
 		t.Errorf("Expecting no attributes matches, got %d", len(ra.AttributeMatches))
 	}
 
-	b.ResetReferencedAttributes(snap)
+	b.RestoreReferencedAttributes(snap)
 
 	ra = b.GetReferencedAttributes(globalDict, len(globalDict))
 	if len(ra.AttributeMatches) != 5 {
@@ -795,6 +777,19 @@ func TestFakeMutableBag(t *testing.T) {
 	} else if v.(int) != 1 {
 		t.Errorf("Got %d, expecting 1", v.(int))
 	}
+}
+
+func TestGlobalList(t *testing.T) {
+	l := GlobalList()
+
+	// check that there's a known string in there...
+	for _, s := range l {
+		if s == "destination.service" {
+			return
+		}
+	}
+
+	t.Error("Did not find destination.service")
 }
 
 func init() {
