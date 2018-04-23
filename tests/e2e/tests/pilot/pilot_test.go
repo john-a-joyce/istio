@@ -94,7 +94,7 @@ func setTestConfig() error {
 	tc.AppDir = appDir
 
 	// Add additional apps for this test suite.
-	apps := getApps(tc)
+	/* JAJ apps := getApps(tc)
 	for i := range apps {
 		tc.Kube.AppManager.AddApp(&apps[i])
 		if tc.Kube.RemoteKubeConfig != "" {
@@ -112,6 +112,7 @@ func setTestConfig() error {
 		},
 		kubeconfig: tc.Kube.KubeConfig,
 	}
+	JAJ */
 	return nil
 }
 

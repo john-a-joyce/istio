@@ -27,10 +27,10 @@ import (
 	"istio.io/istio/pkg/log"
 )
 
-func getKubeConfigFromFile(dirname string) (string, error) {
+func getKubeConfigFromFile(dirname string) (string, string, error) {
 	// The tests assume that only a single remote cluster (i.e. a single file) is in play
 
-	var remoteKube string
+	var remoteKube, localKube string
 	err := filepath.Walk(dirname, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -43,13 +43,19 @@ func getKubeConfigFromFile(dirname string) (string, error) {
 			log.Warnf("Failed to read %s: %v", path, err)
 			return err
 		}
-		remoteKube = path
+		log.Infof("JAJ %s", path)
+
+		if filepath.Base(path) == "local" {
+			localKube = path
+		} else {
+			remoteKube = path
+		}
 		return nil
 	})
 	if err != nil {
-		return "", nil
+		return "", "", nil
 	}
-	return remoteKube, nil
+	return localKube, remoteKube, nil //JAJ
 }
 
 func (k *KubeInfo) generateRemoteIstio(src, dst string) error {
