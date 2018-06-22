@@ -142,6 +142,8 @@ func (b *builder) Build(ctx context.Context, env adapter.Env) (adapter.Handler, 
 		b.controllers[path] = controller
 	}
 
+	env.Logger().Infof("installed %d controllers", len(controllers))
+
 	return &handler{
 		env:      env,
 		k8sCache: controller,
