@@ -20,8 +20,8 @@ import (
 	"net"
 	"strings"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
 	ot "github.com/opentracing/opentracing-go"
 	"google.golang.org/grpc"
@@ -302,3 +302,21 @@ func (s *Server) Addr() net.Addr {
 func (s *Server) Dispatcher() dispatcher.Dispatcher {
 	return s.dispatcher
 }
+/* JAJ
+// initMultiClusterController initializes multi cluster controller
+// currently implemented only for kubernetes registries
+func (s *Server) initMultiClusterController(args *Args) (err error) {
+	// JAJ will need to check for kuber
+	//JAJ if checkForKubernetes(args.Service.Registries) {
+		// Start secret controller which watches for runtime secret Object changes and adds secrets dynamically
+		err = kubernetesenv.StartSecretController(s.kubeClient,
+			s.clusterStore,
+			s.ServiceController,
+			// s.EnvoyXdsServer,
+			args.Config.ClusterRegistriesNamespace,
+			args.Config.ControllerOptions.ResyncPeriod,
+			args.Config.ControllerOptions.WatchedNamespace,
+			args.Config.ControllerOptions.DomainSuffix)
+	//JAJ }
+	return
+}*/

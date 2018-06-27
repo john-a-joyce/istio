@@ -206,11 +206,11 @@ func (c *Controller) processItem(key string) error {
 }
 
 func addMemberCluster(s *corev1.Secret, c *Controller) {
-	c.cs.storeLock.Lock()
-	defer c.cs.storeLock.Unlock()
+	c.cs.StoreLock.Lock()
+	defer c.cs.StoreLock.Unlock()
 	// Check if there is already a cluster member with the specified
 	key := Metadata{Name: s.ObjectMeta.Name, Namespace: s.ObjectMeta.Namespace}
-	if _, ok := c.cs.rc[key]; !ok {
+	if _, ok := c.cs.Rc[key]; !ok {
 		log.Infof("Adding new cluster member: %s", s.ObjectMeta.Name)
 		clientConfig, err := clientcmd.Load(s.Data[s.ObjectMeta.Name])
 		if err != nil {
@@ -227,16 +227,16 @@ func addMemberCluster(s *corev1.Secret, c *Controller) {
 				Namespace: s.ObjectMeta.Namespace,
 			},
 		}
-		c.cs.rc[key] = &RemoteCluster{}
-		c.cs.rc[key].Client = clientConfig
-		c.cs.rc[key].Cluster = &cluster
+		c.cs.Rc[key] = &RemoteCluster{}
+		c.cs.Rc[key].Client = clientConfig
+		c.cs.Rc[key].Cluster = &cluster
 		client, _ := kube.CreateInterfaceFromClusterConfig(clientConfig)
 		kubectl := kube.NewController(client, kube.ControllerOptions{
 			WatchedNamespace: c.watchedNamespace,
 			ResyncPeriod:     c.resyncInterval,
 			DomainSuffix:     c.domainSufix,
 		})
-		c.cs.rc[key].Controller = kubectl
+		c.cs.Rc[key].Controller = kubectl
 		c.serviceController.AddRegistry(
 			aggregate.Registry{
 				Name:             serviceregistry.KubernetesRegistry,
@@ -246,7 +246,7 @@ func addMemberCluster(s *corev1.Secret, c *Controller) {
 				Controller:       kubectl,
 			})
 		stopCh := make(chan struct{})
-		c.cs.rc[key].ControlChannel = stopCh
+		c.cs.Rc[key].ControlChannel = stopCh
 		_ = kubectl.AppendServiceHandler(func(*model.Service, model.Event) { c.discoveryServer.ClearCacheFunc() })
 		_ = kubectl.AppendInstanceHandler(func(*model.ServiceInstance, model.Event) { c.discoveryServer.ClearCacheFunc() })
 
@@ -254,24 +254,24 @@ func addMemberCluster(s *corev1.Secret, c *Controller) {
 	}
 	// TODO Add exporting a number of cluster to Prometheus
 	// for now for debbuging purposes, print it to the log.
-	log.Infof("Number of clusters in the cluster store: %d", len(c.cs.rc))
+	log.Infof("Number of clusters in the cluster store: %d", len(c.cs.Rc))
 }
 
 func deleteMemberCluster(s Metadata, c *Controller) {
-	c.cs.storeLock.Lock()
-	defer c.cs.storeLock.Unlock()
+	c.cs.StoreLock.Lock()
+	defer c.cs.StoreLock.Unlock()
 	// Check if there is a cluster member with the specified name
-	if _, ok := c.cs.rc[s]; ok {
+	if _, ok := c.cs.Rc[s]; ok {
 		log.Infof("Deleting cluster member: %s", s)
 		// Deleting Service registry associated with controller
-		c.serviceController.DeleteRegistry(GetClusterID(c.cs.rc[s].Cluster))
+		c.serviceController.DeleteRegistry(GetClusterID(c.cs.Rc[s].Cluster))
 		// Stop controller
-		close(c.cs.rc[s].ControlChannel)
-		<-c.cs.rc[s].ControlChannel
+		close(c.cs.Rc[s].ControlChannel)
+		<-c.cs.Rc[s].ControlChannel
 		// Deleting remote cluster entry from clusters store
-		delete(c.cs.rc, s)
+		delete(c.cs.Rc, s)
 	}
-	log.Infof("Number of clusters in the cluster store: %d", len(c.cs.rc))
+	log.Infof("Number of clusters in the cluster store: %d", len(c.cs.Rc))
 }
 
 func (c *Controller) secretAdd(obj interface{}) {

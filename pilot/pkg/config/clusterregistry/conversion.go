@@ -59,15 +59,15 @@ type RemoteCluster struct {
 
 // ClusterStore is a collection of clusters
 type ClusterStore struct {
-	rc        map[Metadata]*RemoteCluster
-	storeLock sync.RWMutex
+	Rc        map[Metadata]*RemoteCluster
+	StoreLock sync.RWMutex
 }
 
 // NewClustersStore initializes data struct to store clusters information
 func NewClustersStore() *ClusterStore {
 	rc := make(map[Metadata]*RemoteCluster)
 	return &ClusterStore{
-		rc: rc,
+		Rc: rc,
 	}
 }
 
@@ -82,7 +82,7 @@ func (cs *ClusterStore) GetClusterAccessConfig(cluster *k8s_cr.Cluster) *clientc
 		return nil
 	}
 	key := Metadata{Name: cluster.ObjectMeta.Name, Namespace: cluster.ObjectMeta.Namespace}
-	clusterAccessConfig := cs.rc[key].Client
+	clusterAccessConfig := cs.Rc[key].Client
 	return clusterAccessConfig
 }
 
@@ -156,9 +156,9 @@ func getClustersConfigs(k8s kubernetes.Interface, configMapName, configMapNamesp
 			continue
 		}
 		s := Metadata{Name: cluster.ObjectMeta.Name, Namespace: cluster.ObjectMeta.Namespace}
-		cs.rc[s] = &RemoteCluster{}
-		cs.rc[s].Client = clientConfig
-		cs.rc[s].Cluster = &cluster
+		cs.Rc[s] = &RemoteCluster{}
+		cs.Rc[s].Client = clientConfig
+		cs.Rc[s].Cluster = &cluster
 	}
 
 	return

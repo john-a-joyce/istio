@@ -92,7 +92,7 @@ func TestGetPilotClusters(t *testing.T) {
 		{
 			testName: "3 out of 3 Pilot in the store",
 			cs: &ClusterStore{
-				rc: map[Metadata]*RemoteCluster{
+				Rc: map[Metadata]*RemoteCluster{
 					{
 						Name:      "cluster1",
 						Namespace: "istio-testing"}: {
@@ -130,7 +130,7 @@ func TestGetPilotClusters(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		numberOfPilots := len(test.cs.rc)
+		numberOfPilots := len(test.cs.Rc)
 		if numberOfPilots != test.numberOfPilots {
 			t.Errorf("Test '%s' failed, expected: %d number of Pilots, got: %d ", test.testName,
 				test.numberOfPilots, numberOfPilots)

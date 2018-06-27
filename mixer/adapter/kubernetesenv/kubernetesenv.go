@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8s "k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth" // needed for auth
 	"k8s.io/client-go/tools/cache"
@@ -43,6 +42,8 @@ import (
 	"istio.io/istio/mixer/adapter/kubernetesenv/config"
 	ktmpl "istio.io/istio/mixer/adapter/kubernetesenv/template"
 	"istio.io/istio/mixer/pkg/adapter"
+	"istio.io/istio/mixer/adapter/kubernetesenv/clusterregistry"
+	"istio.io/istio/pkg/log"
 )
 
 const (
@@ -68,16 +69,20 @@ type (
 
 		sync.Mutex
 		controllers map[string]cacheController
+
+		// required for multicluster scenarios
+		hdl     *handler
 	}
 
 	handler struct {
-		k8sCache []cacheController
+		k8sCache map[string]cacheController
 		env      adapter.Env
 		params   *config.Params
 	}
 
 	// used strictly for testing purposes
 	clientFactoryFn func(kubeconfigPath string, env adapter.Env) (k8s.Interface, error)
+
 )
 
 // compile-time validation
@@ -114,7 +119,8 @@ func (b *builder) Validate() (ce *adapter.ConfigErrors) {
 
 func (b *builder) Build(ctx context.Context, env adapter.Env) (adapter.Handler, error) {
 	paramsProto := b.adapterConfig
-	var controllers []cacheController
+	var controller cacheController
+	var controllers map[string]cacheController = make(map[string]cacheController)
 
 	path, exists := os.LookupEnv("KUBECONFIG")
 	if !exists {
@@ -139,59 +145,78 @@ func (b *builder) Build(ctx context.Context, env adapter.Env) (adapter.Handler, 
 			return nil, fmt.Errorf("could not create new cache controller: %v", err)
 		}
 
-		controllers = append(controllers, controller)
+		controllers[path] = controller
 		b.controllers[path] = controller
 
-		remote_controllers, err := createRemoteCacheControllers(b, clientset, env)
-		if err == nil {
-			controllers = append(controllers, remote_controllers...)
-		} else {
-			return nil, fmt.Errorf("failure on creating remote controllers: %v", err)
-		}
 	} else {
-		for key := range b.controllers {
-			controllers = append(controllers, b.controllers[key])
+		//  TODO - this seems a bit odd need to understand what scenario gets us here
+		for clusterID := range b.controllers {
+			controllers[clusterID] = controller
 		}
 	}
 
 	env.Logger().Infof("installed %d controllers", len(controllers))
 
-	return &handler{
+	hdl := &handler{
 		env:      env,
 		k8sCache: controllers,
 		params:   paramsProto,
-	}, nil
+	}
+
+	controllers = hdl.k8sCache
+	b.hdl = hdl
+	if err := initMultiClusterController(b, path, b.createRemoteCacheControllers, b.deleteRemoteCacheControllers); err != nil {
+		return nil, err
+	}
+	return hdl, nil
 }
 
-func createRemoteCacheControllers(b *builder, clientset k8s.Interface,
-	env adapter.Env) ([]cacheController, error) {
-	var remote_controllers []cacheController
-	var opts meta_v1.ListOptions
+func (b *builder) createRemoteCacheControllers(clientset k8s.Interface, dataKey string) (error) {
 
-	secretNamespace := "istio-system" // TODO: make configurable
-	mcLabel := "istio/multiCluster"
-	opts.LabelSelector = mcLabel + "=true"
+	var controllers map[string]cacheController
+	var cont_string string
 
-	kube_secrets, err := clientset.CoreV1().Secrets(secretNamespace).List(opts)
+	b.Lock()
+	defer b.Unlock()
+	b.hdl.env.Logger().Infof("JAJ create remote cache controller ")
+
+	for cont_string = range b.controllers {
+		b.hdl.env.Logger().Infof("JAJ controller data key = %s", cont_string)
+	}
+	// for dataKey, kubeconfig := range secret.Data {
+
+	controller, found := b.controllers[dataKey]
+	if found {
+		// Nothing to do
+		return nil
+	}
+
+	controller, err := getNewCacheController(b, clientset, b.hdl.env)
 	if err != nil {
-		return nil, fmt.Errorf("could not access secrets for namespace: %s error: %v",
-			secretNamespace, err)
+		fmt.Errorf("could not create a new cache controller: %v", err)
+		return err
+	}
+        //JAJ TODO - do I need a make here for proper memory allocation?
+	b.controllers[dataKey] = controller
+	controllers = b.hdl.k8sCache
+	// JAJ this doesn't seem right think I need to append or something.
+	controllers[dataKey] = controller
+	b.hdl.k8sCache = controllers
+
+	return nil
+}
+
+func (b *builder) deleteRemoteCacheControllers(dataKey string) (error) {
+	// JAJ todo - Rich stops a channel here, but it's not clear why that is needed or where that is started.
+	if _, ok := b.controllers[dataKey]; ok {
+		b.hdl.env.Logger().Infof("deleted remote controller %s", dataKey)
+		delete(b.controllers, dataKey)
+		delete(b.hdl.k8sCache, dataKey)
+		return nil
+	} else {
+		return fmt.Errorf("Enable to find cluster %s", dataKey)
 	}
 
-	for _, secret := range kube_secrets.Items {
-		for dataKey, kubeconfig := range secret.Data {
-			k8sInterface, err := getK8sInterface(kubeconfig)
-			if err != nil {
-				return nil, fmt.Errorf("error on K8s interface access: %v", err)
-			}
-
-			controller, err := getNewCacheController(b, k8sInterface, env)
-			remote_controllers = append(remote_controllers, controller)
-			b.controllers[dataKey] = controller
-		}
-	}
-
-	return remote_controllers, nil
 }
 
 func createK8sInterface(kubeconfig []byte) (k8s.Interface, error) {
@@ -226,6 +251,7 @@ func getNewCacheController(b *builder, clientset k8s.Interface,
 	// ensure that any request is only handled after
 	// a sync has occurred
 	env.Logger().Infof("Waiting for kubernetes cache sync...")
+
 	if success := cache.WaitForCacheSync(stopChan, controller.HasSynced); !success {
 		stopChan <- struct{}{}
 		return nil, errors.New("cache sync failure")
@@ -246,6 +272,7 @@ func newBuilder(clientFactory clientFactoryFn) *builder {
 func (h *handler) GenerateKubernetesAttributes(ctx context.Context, inst *ktmpl.Instance) (*ktmpl.Output, error) {
 	out := ktmpl.NewOutput()
 
+	h.env.Logger().Infof("JAJ in GenerateKubernetesAttributes length of cachecontroller %i", len(h.k8sCache))
 	if inst.DestinationUid != "" {
 		if p, found := h.findPod(inst.DestinationUid); found {
 			h.fillDestinationAttrs(p, inst.DestinationPort, out, h.params)
@@ -393,4 +420,21 @@ func newKubernetesClient(kubeconfigPath string, env adapter.Env) (k8s.Interface,
 		return nil, fmt.Errorf("could not retrieve kubeconfig: %v", err)
 	}
 	return k8s.NewForConfig(config)
+}
+
+// initMultiClusterController initializes multi cluster controller
+// currently implemented only for kubernetes registries
+func initMultiClusterController(b *builder, kubeconfig string, addfn clusterregistry.AddClusterFunc, rmfn clusterregistry.RmClusterFunc) (err error) {
+
+    kubeClient, err := newKubernetesClient(kubeconfig, b.hdl.env)
+	if err != nil  {
+		return fmt.Errorf("could not create K8s client: %v", err)
+	}
+	log.Info("JAJ init mc controller")
+	err = clusterregistry.StartSecretController(kubeClient,
+		addfn,
+		rmfn,
+		//JAJ TODO need to get this from the configuration somehow
+		"istio-system")
+	return
 }
