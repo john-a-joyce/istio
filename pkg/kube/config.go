@@ -20,8 +20,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+        clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
-
 // BuildClientConfig is a helper function that builds client config from a kubeconfig filepath.
 // It overrides the current context with the one provided (empty to use default).
 //
@@ -57,4 +57,20 @@ func CreateClientset(kubeconfig, context string) (*kubernetes.Clientset, error) 
 		return nil, err
 	}
 	return kubernetes.NewForConfig(c)
+}
+
+// CreateInterfaceFromClusterConfig is a helper function to create Kubernetes interface from in memory cluster config struct
+func CreateInterfaceFromClusterConfig(clusterConfig *clientcmdapi.Config) (kubernetes.Interface, error) {
+       return createInterface(clusterConfig)
+}
+
+// createInterface is new function which creates rest config and kubernetes interface
+// from passed cluster's config struct
+func createInterface(clusterConfig *clientcmdapi.Config) (kubernetes.Interface, error) {
+       clientConfig := clientcmd.NewDefaultClientConfig(*clusterConfig, &clientcmd.ConfigOverrides{})
+       rest, err := clientConfig.ClientConfig()
+       if err != nil {
+               return nil, err
+       }
+       return kubernetes.NewForConfig(rest)
 }
