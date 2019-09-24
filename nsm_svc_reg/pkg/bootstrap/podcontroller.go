@@ -114,7 +114,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 
-	log.Info("Starting Pods controller")
+	log.Info("Starting Pod watcher controller")
 
 	go c.informer.Run(stopCh)
 
@@ -192,7 +192,7 @@ func (c *Controller) addPod(PodName string, pod *corev1.Pod) {
 
 //func (c *Controller) deletePod(PodName string, s *corev1.Pod) {
 func (c *Controller) deletePod(PodName string) {
-	log.Infof("Delete Pod name = %s ", PodName)
+	log.Infof("FIXME need to delete Pod name = %s ", PodName)
 }
 
 func (c *Controller) checkSVCName(pod *corev1.Pod) (string, int32) {
@@ -219,7 +219,6 @@ func (c *Controller) checkSVCName(pod *corev1.Pod) (string, int32) {
 func (c *Controller) getPodEndpoint(pod *corev1.Pod) string {
 	podHandle := pod.Name
 	cmd := "ip -o addr list"
-	//cmd = "ifconfig " + ifName
 	output, err:= util.ShellSilent("kubectl exec %s --kubeconfig=%s -- %s | grep %s", podHandle, c.kubeconfig, cmd, ifName)
 	if err != nil{
 		for i := 1;  i<=20; i++ {
@@ -291,7 +290,8 @@ func (c *Controller) createSVC(svcName string, portNumber int32) error {
 }
 
 func (c *Controller) createEP(svcName string, portNumber int32, endPoint string) error {
-	
+
+        //FIXME This functions needs to be updated to append to the subset if it already exists. 
 	eas := make([]corev1.EndpointAddress, 0)
 	eas = append(eas, corev1.EndpointAddress{IP: endPoint})
 	eps := make([]corev1.EndpointPort,0)
@@ -320,13 +320,6 @@ func findIP(input string) string {
 	regexPattern := numBlock + "\\." + numBlock + "\\." + numBlock + "\\." + numBlock
 	regEx := regexp.MustCompile(regexPattern)
 
-	//regexPattern1 := "inet addr:" + numBlock + "\\." + numBlock + "\\." + numBlock + "\\." + numBlock
-	//matchEX := regexp.MustCompile(regexPattern1)
-	//match := matchEX.FindStringSubmatch(input)
-	//log.Infof("The match ip is %v, %s", match, len(match))
-	//for i := 1;  i<len(match); i++ {
-	//	log.Infof("The match %i is %s", i, match[i])
-	//}
 	return regEx.FindString(input)
 }
 

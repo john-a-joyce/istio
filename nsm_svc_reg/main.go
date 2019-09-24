@@ -41,15 +41,15 @@ var (
 	loggingOptions = log.DefaultOptions()
 
 	rootCmd = &cobra.Command{
-		Use:          "jaj-test",
-		Short:        "Istio Pilot.",
-		Long:         "Service Mesh.",
+		Use:          "pod-watcher",
+		Short:        "Pod Watcher",
+		Long:         "NSM Pods",
 		SilenceUsage: true,
 	}
 
 	discoveryCmd = &cobra.Command{
-		Use:   "jaj-test",
-		Short: "Start Istio proxy discovery service.",
+		Use:   "pod-watcher",
+		Short: "Start a controller to watch pods.",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(c *cobra.Command, args []string) error {
 			cmd.PrintFlags(c.Flags())
@@ -63,12 +63,12 @@ var (
 			// Create the server for the discovery service.
 			discoveryServer, err := bootstrap.NewServer(serverArgs)
 			if err != nil {
-				return fmt.Errorf("failed to create discovery service: %v", err)
+				return fmt.Errorf("failed to create controller: %v", err)
 			}
 
 			// Start the server
 			if err := discoveryServer.Start(stop); err != nil {
-				return fmt.Errorf("failed to start discovery service: %v", err)
+				return fmt.Errorf("failed to start controller : %v", err)
 			}
 
 			cmd.WaitSignal(stop)
@@ -77,23 +77,11 @@ var (
 	}
 )
 
-/*
-// when we run on k8s, the default trust domain is 'cluster.local', otherwise it is the empty string
-func hasKubeRegistry() bool {
-	for _, r := range serverArgs.Service.Registries {
-		if serviceregistry.ServiceRegistry(r) == serviceregistry.KubernetesRegistry {
-			return true
-		}
-	}
-	return false
-}
-
-*/
 func init() {
 	discoveryCmd.PersistentFlags().StringVar(&serverArgs.Config.KubeConfig, "kubeconfig", "",
-		"Kubernetes configuration file of local cluster")
+		"Kubernetes configuration file of cluster being watched")
 	discoveryCmd.PersistentFlags().StringVar(&serverArgs.Config.KubeConfigRemote, "kubeconfigremote", "",
-		"Kubernetes configuration file of remote cluster")
+		"Kubernetes configuration file of cluster to create objects")
 	discoveryCmd.PersistentFlags().StringVarP(&serverArgs.Config.WatchedNamespace, "appNamespace",
 		"a", metav1.NamespaceAll,
 		"Restrict the applications namespace the controller manages; if not set, controller watches all namespaces")
@@ -106,9 +94,9 @@ func init() {
 	rootCmd.AddCommand(discoveryCmd)
 	rootCmd.AddCommand(version.CobraCommand())
 	rootCmd.AddCommand(collateral.CobraCommand(rootCmd, &doc.GenManHeader{
-		Title:   "Istio Pilot Discovery",
-		Section: "pilot-discovery CLI",
-		Manual:  "Istio Pilot Discovery",
+		Title:   "Pod Watcher",
+		Section: "Pod Watcher CLI",
+		Manual:  "NSM Pod Watcher",
 	}))
 
 }

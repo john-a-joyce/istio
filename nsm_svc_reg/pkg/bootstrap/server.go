@@ -17,7 +17,6 @@ package bootstrap
 import (
 	"fmt"
 	"github.com/hashicorp/go-multierror"
-	"istio.io/istio/pkg/config/constants"
 	"time"
 
 	//"time"
@@ -70,7 +69,7 @@ func NewServer(args PilotArgs) (*Server, error) {
 		if args.Namespace != "" {
 			args.Config.ClusterRegistriesNamespace = args.Namespace
 		} else {
-			args.Config.ClusterRegistriesNamespace = constants.IstioSystemNamespace
+			args.Config.ClusterRegistriesNamespace = "default"
 		}
 	}
 
@@ -78,11 +77,11 @@ func NewServer(args PilotArgs) (*Server, error) {
 
 	// Apply the arguments to the configuration.
 	if err := s.initKubeClient(&args); err != nil {
-		return nil, fmt.Errorf("kube client: %v", err)
+		return nil, fmt.Errorf("local kube client: %v", err)
 	}
 
 	if err := s.initRemoteClient(&args); err != nil {
-		return nil, fmt.Errorf("cluster registries: %v", err)
+		return nil, fmt.Errorf("remote kube client: %v", err)
 	}
 
 	controller := newController(s.kubeClient, "default", s.kubeconfig, s.remoteKubeClient, s.remoteKubeconfig)
@@ -113,7 +112,6 @@ func (s *Server) getKubeCfgFile(args *PilotArgs) string {
 
 // initKubeClient creates the k8s client if running in an k8s environment.
 func (s *Server) initKubeClient(args *PilotArgs) error {
-	//log.Infof("JAJ, kubeconfig %v", args.Config.KubeConfig)
 	client, kuberr := kubelib.CreateClientset(args.Config.KubeConfig, "")
 	if kuberr != nil {
 		return multierror.Prefix(kuberr, "failed to connect to Kubernetes API.")
@@ -129,7 +127,6 @@ func (s *Server) initRemoteClient(args *PilotArgs) error {
 		err := fmt.Errorf("remotekubeconfig empty")
 		return multierror.Prefix(err, "failed to connect to Kubernetes API.")
 	}
-	//log.Infof("JAJ, remote kubeconfig %v", args.Config.KubeConfigRemote)
 	client, kuberr := kubelib.CreateClientset(args.Config.KubeConfigRemote, "")
 	if kuberr != nil {
 		return multierror.Prefix(kuberr, "failed to connect to Kubernetes API.")
