@@ -39,6 +39,7 @@ const (
 	portLabel   = "nsm/serviceport"
 	maxRetries  = 5
 	ifName      = "nsm"
+	//ifName      = "eth"
 	namespace   = "default"
 )
 
@@ -291,7 +292,39 @@ func (c *Controller) createSVC(svcName string, portNumber int32) error {
 
 func (c *Controller) createEP(svcName string, portNumber int32, endPoint string) error {
 
-        //FIXME This functions needs to be updated to append to the subset if it already exists. 
+	getOpt := meta_v1.GetOptions{IncludeUninitialized: true}
+
+	testEP, err := c.remoteKubeClientset.CoreV1().Endpoints(namespace).Get(svcName, getOpt)
+	if err == nil {
+		log.Infof("Endpoint already exists checking addresses")
+		for _, ss := range testEP.Subsets {
+			for _, ea := range ss.Addresses {
+				if ea.IP == endPoint {
+					log.Infof("Address already part of endpoint skipping")
+					return nil
+				}
+			}
+		}
+
+		testEP.Subsets[0].Addresses = append(testEP.Subsets[0].Addresses, corev1.EndpointAddress{
+			IP: endPoint,
+		})
+		testEP, err = c.remoteKubeClientset.CoreV1().Endpoints(namespace).Update(testEP)
+		if err != nil {
+			log.Infof("Couldn't add address = %s to endpoint", testEP, endPoint)
+		}
+		/*
+		eps, err = client.CoreV1().Endpoints(namespace).Update(eps)
+
+		        for _, ip := range b.ips {
+                testEP.Subsets[0].Addresses = append(eps.Subsets[0].Addresses, coreV1.EndpointAddress{
+                        IP: ip,
+                })
+        }
+		 */
+		 return nil
+	}
+
 	eas := make([]corev1.EndpointAddress, 0)
 	eas = append(eas, corev1.EndpointAddress{IP: endPoint})
 	eps := make([]corev1.EndpointPort,0)
