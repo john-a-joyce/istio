@@ -33,6 +33,8 @@ type Cluster struct {
 	// Client for accessing the cluster.
 	Client kube.Client
 
+	timestamp time.Time
+
 	kubeConfigSha [sha256.Size]byte
 
 	stop chan struct{}

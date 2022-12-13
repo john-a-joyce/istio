@@ -15,7 +15,6 @@
 package multicluster
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -82,6 +81,7 @@ var (
 type ClusterHandler interface {
 	ClusterAdded(cluster *Cluster, stop <-chan struct{}) error
 	ClusterUpdated(cluster *Cluster, stop <-chan struct{}) error
+	ClusterClose(clusterID cluster.ID) error
 	ClusterDeleted(clusterID cluster.ID) error
 }
 
@@ -210,6 +210,7 @@ func (c *Controller) hasSynced() bool {
 	return true
 }
 
+// JAJ is for the overall secret controller not useful for controlling XDS
 func (c *Controller) HasSynced() bool {
 	synced := c.hasSynced()
 	if synced {
@@ -226,6 +227,7 @@ func (c *Controller) processItem(key types.NamespacedName) error {
 	}
 	if exists {
 		log.Debugf("secret %s exists in informer cache, processing it", key)
+		log.Infof("JAJ secret %s exists in informer cache, processing it", key)
 		if err := c.addSecret(key, obj.(*corev1.Secret)); err != nil {
 			return fmt.Errorf("error adding secret %s: %v", key, err)
 		}
@@ -331,9 +333,10 @@ func (c *Controller) createRemoteCluster(kubeConfig []byte, clusterID string) (*
 		return nil, err
 	}
 	return &Cluster{
-		ID:     cluster.ID(clusterID),
-		Client: clients,
-		stop:   make(chan struct{}),
+		ID:        cluster.ID(clusterID),
+		Client:    clients,
+		stop:      make(chan struct{}),
+		timestamp: time.Now(),
 		// for use inside the package, to close on cleanup
 		initialSync:        atomic.NewBool(false),
 		initialSyncTimeout: atomic.NewBool(false),
@@ -343,10 +346,13 @@ func (c *Controller) createRemoteCluster(kubeConfig []byte, clusterID string) (*
 
 func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) error {
 	secretKey := name.String()
-	// First delete clusters
+	// First delete old clusters if this secret contains a new cluster ID
 	existingClusters := c.cs.GetExistingClustersFor(secretKey)
 	for _, existingCluster := range existingClusters {
+		logger := log.WithLabels("secret", secretKey)
+		logger.Infof("JAJ - existing cluster ID %s", existingCluster.ID)
 		if _, ok := s.Data[string(existingCluster.ID)]; !ok {
+			logger.Infof("JAJ - deleting duplicate secretKey stops controller")
 			c.deleteCluster(secretKey, existingCluster.ID)
 		}
 	}
@@ -354,15 +360,22 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 	var errs *multierror.Error
 	for clusterID, kubeConfig := range s.Data {
 		logger := log.WithLabels("cluster", clusterID, "secret", secretKey)
+		// logger.Infof("JAJ secret data %v", s.Data)
 		if cluster.ID(clusterID) == c.configClusterID {
 			logger.Infof("ignoring cluster as it would overwrite the config cluster")
 			continue
 		}
 
 		action, callback := "Adding", c.handleAdd
+		// JAJUP - need to do a new get type here
 		if prev := c.cs.Get(secretKey, cluster.ID(clusterID)); prev != nil {
-			action, callback = "Updating", c.handleUpdate
+			action = "Closing"
+			logger.Infof("JAJ updating cluster about to close ")
+			//JAJTMP  c.handleClose(cluster.ID(clusterID))
+			logger.Infof("JAJ Stopping the cluster")
+			prev.Stop()
 			// clusterID must be unique even across multiple secrets
+			/* JAJ
 			kubeConfigSha := sha256.Sum256(kubeConfig)
 			if bytes.Equal(kubeConfigSha[:], prev.kubeConfigSha[:]) {
 				logger.Infof("skipping update (kubeconfig are identical)")
@@ -370,8 +383,14 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 			}
 			// stop previous remote cluster
 			prev.Stop()
+			*/
+			// err := fmt.Errorf("JAJ returning error to requeue%s cluster_id=%s from secret=%v", action, clusterID, secretKey)
+			// errs = multierror.Append(errs, err)
+			// JAJ should be safe to continue here compared to line 403 continue
+			continue
 		} else if c.cs.Contains(cluster.ID(clusterID)) {
 			// if the cluster has been registered before by another secret, ignore the new one.
+			logger.Infof("JAJ cluster has already been registered")
 			logger.Warnf("cluster has already been registered")
 			continue
 		}
@@ -392,6 +411,7 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 			continue
 		}
 		logger.Infof("finished callback for cluster and starting to sync")
+		// JAJUP - need to store differently
 		c.cs.Store(secretKey, remoteCluster.ID, remoteCluster)
 		go remoteCluster.Run()
 	}
@@ -406,6 +426,7 @@ func (c *Controller) deleteSecret(secretKey string) {
 			log.Infof("ignoring delete cluster %v from secret %v as it would overwrite the config cluster", c.configClusterID, secretKey)
 			continue
 		}
+		log.Infof("JAJ  delete cluster %v from secret %v for testing", c.configClusterID, secretKey)
 		log.Infof("Deleting cluster_id=%v configured by secret=%v", cluster.ID, secretKey)
 		cluster.Stop()
 		err := c.handleDelete(cluster.ID)
@@ -414,6 +435,7 @@ func (c *Controller) deleteSecret(secretKey string) {
 				cluster.ID, secretKey, err)
 		}
 		c.cs.Delete(secretKey, cluster.ID)
+
 	}
 
 	log.Infof("Number of remote clusters: %d", c.cs.Len())
@@ -439,6 +461,15 @@ func (c *Controller) handleAdd(cluster *Cluster, stop <-chan struct{}) error {
 	var errs *multierror.Error
 	for _, handler := range c.handlers {
 		errs = multierror.Append(errs, handler.ClusterAdded(cluster, stop))
+	}
+	return errs.ErrorOrNil()
+}
+
+// JAJ new function
+func (c *Controller) handleClose(key cluster.ID) error {
+	var errs *multierror.Error
+	for _, handler := range c.handlers {
+		errs = multierror.Append(errs, handler.ClusterClose(key))
 	}
 	return errs.ErrorOrNil()
 }

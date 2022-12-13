@@ -159,11 +159,23 @@ func (m *Multicluster) ClusterAdded(cluster *multicluster.Cluster, clusterStopCh
 	return m.initializeCluster(cluster, kubeController, kubeRegistry, *options, configCluster, clusterStopCh)
 }
 
+func (m *Multicluster) ClusterClose(clusterID cluster.ID) error {
+	//JAJ m.m.Lock()
+	//JAJ update this to handle an update
+	// JAJ m.deleteCluster(cluster.ID)
+	m.stopCluster(clusterID)
+	return nil
+}
+
 // ClusterUpdated is passed to the secret controller as a callback to be called
 // when a remote cluster is updated.
 func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan struct{}) error {
+	// Need some logic here to delete the old and start new
 	m.m.Lock()
-	m.deleteCluster(cluster.ID)
+	log.Infof("JAJ stopping cluster queue %q", cluster.ID)
+	//JAJTMP cluster.Stop()
+	//JAJTMP m.stopCluster(cluster.ID)
+	log.Infof("JAJ stopped cluster queue %q", cluster.ID)
 	kubeController, kubeRegistry, options, configCluster, err := m.addCluster(cluster)
 	if err != nil {
 		m.m.Unlock()
@@ -171,6 +183,7 @@ func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan
 	}
 	m.m.Unlock()
 	// clusterStopCh is a channel that will be closed when this cluster removed.
+	// JAJ may want clusterStopCh here.
 	return m.initializeCluster(cluster, kubeController, kubeRegistry, *options, configCluster, stop)
 }
 
@@ -368,6 +381,46 @@ func (m *Multicluster) checkShouldLead(client kubelib.Client, systemNamespace st
 		}
 	}
 	return false
+}
+
+// deleteCluster deletes cluster resources and does not trigger push.
+// This call is not thread safe.
+func (m *Multicluster) stopCluster(clusterID cluster.ID) error {
+	//JAJTMP old debug
+	// client := cluster.Client
+	// client.KubeInformer()
+	// m.serviceEntryController.
+
+	// m.opts.MeshServiceController.UnRegisterHandlersForCluster(clusterID)
+	// m.opts.MeshServiceController.DeleteRegistry(clusterID, provider.Kubernetes)
+	// Want to stop the registry or the informers not the kubecontroller to the remote
+	kc, ok := m.remoteKubeControllers[clusterID]
+	// JAJ stop the registry
+	log.Infof("JAJ in closing stopping kube controller->kuberegistry", clusterID)
+
+	if !ok {
+		log.Infof("cluster %s does not exist, maybe caused by invalid kubeconfig", clusterID)
+		err := fmt.Errorf("cluster doesn't exist")
+		return err
+	}
+	kc.Controller.Stop()
+	if err := kc.Controller.CloseQueue(); err != nil {
+		log.Warnf("failed closing registry queue %s: %v", clusterID, err)
+	}
+
+	if err := kc.CloseQueue(); err != nil {
+		log.Warnf("failed closing multicluster queue in %s: %v", clusterID, err)
+	}
+
+	//if kc.workloadEntryController != nil {
+	//	m.opts.MeshServiceController.DeleteRegistry(clusterID, provider.External)
+	//}
+
+	return nil
+	//if err := kc.Cleanup(); err != nil {
+	//	log.Warnf("failed cleaning up services in %s: %v", clusterID, err)
+	//}
+	//delete(m.remoteKubeControllers, clusterID)
 }
 
 // deleteCluster deletes cluster resources and does not trigger push.

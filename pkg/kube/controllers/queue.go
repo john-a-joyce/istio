@@ -151,12 +151,15 @@ func (q Queue) processNextItem() bool {
 	}
 
 	q.log.Debugf("handling update: %v", key)
+	q.log.Infof("JAJ handling update: %v and name %s", key, q.name)
 
 	// 'Done marks item as done processing' - should be called at the end of all processing
 	defer q.queue.Done(key)
 
 	err := q.workFn(key)
+
 	if err != nil {
+		q.log.Infof("JAJ err was returned so requeuing")
 		retryCount := q.queue.NumRequeues(key)
 		if retryCount < q.maxAttempts {
 			q.log.Errorf("error handling %v, retrying (retry count: %d): %v", key, retryCount, err)

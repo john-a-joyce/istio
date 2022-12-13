@@ -40,6 +40,7 @@ func newClustersStore() *ClusterStore {
 func (c *ClusterStore) Store(secretKey string, clusterID cluster.ID, value *Cluster) {
 	c.Lock()
 	defer c.Unlock()
+	// JAJUP - need to do store differently
 	if _, ok := c.remoteClusters[secretKey]; !ok {
 		c.remoteClusters[secretKey] = make(map[cluster.ID]*Cluster)
 	}

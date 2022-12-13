@@ -166,6 +166,7 @@ func (c *Controller) handleSelectedNamespace(endpointMode EndpointMode, ns strin
 		return
 	}
 	for _, svc := range services {
+		log.Infof("JAJ handleSelectedNamespace adding service")
 		errs = multierror.Append(errs, c.onServiceEvent(svc, model.EventAdd))
 	}
 

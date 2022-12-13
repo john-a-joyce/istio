@@ -497,11 +497,21 @@ func (c *Controller) Network(endpointIP string, labels labels.Instance) network.
 }
 
 func (c *Controller) Cleanup() error {
+	log.Infof("JAJ cleaning up controller %q", c.Cluster())
 	if err := queue.WaitForClose(c.queue, 30*time.Second); err != nil {
 		log.Warnf("queue for removed kube registry %q may not be done processing: %v", c.Cluster(), err)
 	}
 	if c.opts.XDSUpdater != nil {
 		c.opts.XDSUpdater.RemoveShard(model.ShardKeyFromRegistry(c))
+	}
+	return nil
+}
+
+func (c *Controller) CloseQueue() error {
+	log.Infof("JAJ closing the queue cluster %q", c.Cluster())
+	if err := queue.WaitForClose(c.queue, 5*time.Second); err != nil {
+		log.Warnf("queue for removed kube registry %q may not be done processing: %v", c.Cluster(), err)
+		return err
 	}
 	return nil
 }
@@ -736,6 +746,7 @@ func (c *Controller) HasSynced() bool {
 	return c.initialSync.Load()
 }
 
+// JAJ can we stop these informers
 func (c *Controller) informersSynced() bool {
 	if (c.nsInformer != nil && !c.nsInformer.HasSynced()) ||
 		!c.serviceInformer.HasSynced() ||
@@ -801,6 +812,7 @@ func (c *Controller) syncServices() error {
 	services, _ := c.serviceInformer.List(metav1.NamespaceAll)
 	log.Debugf("initializing %d services", len(services))
 	for _, s := range services {
+		log.Infof("JAJ initializing %d services", len(services))
 		err = multierror.Append(err, c.onServiceEvent(s, model.EventAdd))
 	}
 	return err.ErrorOrNil()

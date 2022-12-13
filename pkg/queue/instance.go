@@ -106,6 +106,7 @@ func (q *queueImpl) processNextItem() bool {
 	}
 
 	// Run the task.
+	log.Infof("JAJ instance.go queue ID = %s", q.id)
 	if err := task(); err != nil {
 		delay := q.delay
 		log.Infof("Work item handle failed (%v), retry after delay %v", err, delay)

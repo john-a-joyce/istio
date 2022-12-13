@@ -171,6 +171,8 @@ func (e *endpointsController) buildIstioEndpoints(endpoint any, host host.Name) 
 	var endpoints []*model.IstioEndpoint
 	ep := endpoint.(*v1.Endpoints)
 
+	log.Infof("JAJ buildIstioEndpoints: %v, host:  %s", endpoint, host)
+
 	discoverabilityPolicy := e.c.exports.EndpointDiscoverabilityPolicy(e.c.GetService(host))
 
 	for _, ss := range ep.Subsets {

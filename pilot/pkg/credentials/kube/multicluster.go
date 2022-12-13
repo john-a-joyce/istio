@@ -55,6 +55,7 @@ func (m *Multicluster) ClusterAdded(cluster *multicluster.Cluster, _ <-chan stru
 }
 
 func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan struct{}) error {
+	// JAJ does this need updated as well?
 	sc := NewCredentialsController(cluster.Client, cluster.ID)
 	m.m.Lock()
 	defer m.m.Unlock()
@@ -69,6 +70,13 @@ func (m *Multicluster) ClusterDeleted(key cluster.ID) error {
 	delete(m.remoteKubeControllers, key)
 	return nil
 }
+
+// JAJ 
+func (m *Multicluster) ClusterClose(key cluster.ID) error {
+	// JAJ do nothing for now
+	return nil
+}
+
 
 func (m *Multicluster) addCluster(cluster *multicluster.Cluster, sc *CredentialsController) {
 	m.remoteKubeControllers[cluster.ID] = sc
