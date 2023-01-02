@@ -86,8 +86,10 @@ func processEndpointEvent(c *Controller, epc kubeEndpointsController, name strin
 }
 
 func updateEDS(c *Controller, epc kubeEndpointsController, ep any, event model.Event) {
+	// JAJ sync all comes down this path
 	namespacedName := epc.getServiceNamespacedName(ep)
 	log.Debugf("Handle EDS endpoint %s %s in namespace %s", namespacedName.Name, event, namespacedName.Namespace)
+	log.Debugf("JAJ endpoint %v", ep)
 	var forgottenEndpointsByHost map[host.Name][]*model.IstioEndpoint
 	if event == model.EventDelete {
 		forgottenEndpointsByHost = epc.forgetEndpoint(ep)

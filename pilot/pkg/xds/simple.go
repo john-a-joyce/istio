@@ -67,6 +67,7 @@ func NewXDS(stop chan struct{}) *SimpleServer {
 	// Prepare a working XDS server, with aggregate config and registry stores and a memory store for each.
 	// TODO: refactor bootstrap code to use this server, and add more registries.
 
+	log.Debugf("JAJ NewXDS in simple.go")
 	env := model.NewEnvironment()
 	env.Watcher = mesh.NewFixedWatcher(mesh.DefaultMeshConfig())
 	env.PushContext.Mesh = env.Watcher.Mesh()

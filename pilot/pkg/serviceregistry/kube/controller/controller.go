@@ -506,6 +506,19 @@ func (c *Controller) Cleanup() error {
 	return nil
 }
 
+func (c *Controller) checkOldServices(Services []*v1.Service) {
+	// c.opts.XDSUpdater.SvcCheck(services)
+	// JAJ c.checkOldServices(services)
+	// var svcConv *model.Service
+	// var newServices []*model.Service
+	newServices := make([]*model.Service, 0, len(Services))
+	for _, s := range services {
+		svcConv := kube.ConvertService(*s, c.opts.DomainSuffix, c.Cluster())
+		newServices = append(newServices, svcConv)
+	}
+	//JAJ
+}
+
 func (c *Controller) onServiceEvent(curr any, event model.Event) error {
 	svc, err := extractService(curr)
 	if err != nil {
@@ -595,6 +608,7 @@ func (c *Controller) addOrUpdateService(svc *v1.Service, svcConv *model.Service,
 		}
 	}
 
+	// JAJ is the the equivalent svc call
 	c.opts.XDSUpdater.SvcUpdate(shard, string(svcConv.Hostname), ns, event)
 
 	c.handlers.NotifyServiceHandlers(svcConv, event)
@@ -697,6 +711,7 @@ func (c *Controller) registerHandlers(
 				if !shouldEnqueue(otype, c.beginSync) {
 					return
 				}
+				// JAJ the events come through here
 				c.queue.Push(func() error {
 					return wrappedHandler(cur, model.EventUpdate)
 				})
@@ -754,8 +769,12 @@ func (c *Controller) informersSynced() bool {
 // This can cause great performance cost in multi clusters scenario.
 // Maybe just sync the cache and trigger one push at last.
 func (c *Controller) SyncAll() error {
+	// JAJ can we add some logic here
 	c.beginSync.Store(true)
 	var err *multierror.Error
+	//log.Debugf("JAJ SYncing all %v", c.pods.podsByIP)
+	//c.opts.XDSUpdater.ConfigUpdate()
+	log.Debugf("JAJ SYncing all")
 	err = multierror.Append(err, c.syncDiscoveryNamespaces())
 	err = multierror.Append(err, c.syncSystemNamespace())
 	err = multierror.Append(err, c.syncNodes())
@@ -800,6 +819,8 @@ func (c *Controller) syncServices() error {
 	var err *multierror.Error
 	services, _ := c.serviceInformer.List(metav1.NamespaceAll)
 	log.Debugf("initializing %d services", len(services))
+	//JAJ c.opts.XDSUpdater.SvcCheck(services)
+	c.checkOldServices(services)
 	for _, s := range services {
 		err = multierror.Append(err, c.onServiceEvent(s, model.EventAdd))
 	}
@@ -819,9 +840,12 @@ func (c *Controller) syncPods() error {
 func (c *Controller) syncEndpoints() error {
 	var err *multierror.Error
 	endpoints := c.endpoints.getInformer().GetIndexer().List()
+	// JAJ can we change this to be a delta in some way?
 	log.Debugf("initializing %d endpoints", len(endpoints))
 	for _, s := range endpoints {
+		// this cache is a kube thing tmp := s.(cache.Config.List())
 		err = multierror.Append(err, c.endpoints.onEvent(s, model.EventAdd))
+		//JAJ c.endpoints.
 	}
 	return err.ErrorOrNil()
 }

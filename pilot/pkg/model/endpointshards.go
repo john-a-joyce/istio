@@ -101,6 +101,7 @@ type EndpointIndex struct {
 }
 
 func NewEndpointIndex() *EndpointIndex {
+	log.Debugf("JAJ new endpoint index")
 	return &EndpointIndex{
 		shardsBySvc: make(map[string]map[string]*EndpointShards),
 	}
@@ -153,6 +154,7 @@ func (e *EndpointIndex) ShardsForService(serviceName, namespace string) (*Endpoi
 // GetOrCreateEndpointShard returns the shards. The second return parameter will be true if this service was seen
 // for the first time.
 func (e *EndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) (*EndpointShards, bool) {
+	log.Debugf("JAJ get or create endpoint shard")
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -160,6 +162,7 @@ func (e *EndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) 
 		e.shardsBySvc[serviceName] = map[string]*EndpointShards{}
 	}
 	if ep, exists := e.shardsBySvc[serviceName][namespace]; exists {
+		log.Debugf("JAJ Found endpoint")
 		return ep, false
 	}
 	// This endpoint is for a service that was not previously loaded.
@@ -180,6 +183,18 @@ func (e *EndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespac
 }
 
 func (e *EndpointIndex) DeleteShard(shardKey ShardKey) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for svc, shardsByNamespace := range e.shardsBySvc {
+		for ns := range shardsByNamespace {
+			e.deleteServiceInner(shardKey, svc, ns, false)
+		}
+	}
+	e.cache.ClearAll()
+}
+
+// JAJ new function to update the shards for a updated cluster.
+func (e *EndpointIndex) UpdateShard(shardKey ShardKey) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for svc, shardsByNamespace := range e.shardsBySvc {

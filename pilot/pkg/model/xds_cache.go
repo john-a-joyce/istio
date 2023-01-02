@@ -16,6 +16,7 @@ package model
 
 import (
 	"fmt"
+	"istio.io/pkg/monitoring"
 	"sync"
 	"time"
 
@@ -27,7 +28,6 @@ import (
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/util/sets"
-	"istio.io/pkg/monitoring"
 )
 
 var enableStats = func() bool {
@@ -160,6 +160,7 @@ func newLru(evictCallback simplelru.EvictCallback) simplelru.LRUCache {
 	if err != nil {
 		panic(fmt.Errorf("invalid lru configuration: %v", err))
 	}
+	log.Debugf("JAJ new Lru cache")
 	return l
 }
 
@@ -365,6 +366,7 @@ func (l *lruCache) ClearAll() {
 	// Purge with an evict function would turn up to be pretty slow since
 	// it runs the function for every key in the store, might be better to just
 	// create a new store.
+	log.Debugf("JAJ clearing the cache")
 	l.store = newLru(l.onEvict)
 	l.configIndex = map[ConfigHash]sets.String{}
 	l.typesIndex = map[kind.Kind]sets.String{}

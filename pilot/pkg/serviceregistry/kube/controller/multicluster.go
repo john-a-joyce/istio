@@ -161,9 +161,20 @@ func (m *Multicluster) ClusterAdded(cluster *multicluster.Cluster, clusterStopCh
 
 // ClusterUpdated is passed to the secret controller as a callback to be called
 // when a remote cluster is updated.
-func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan struct{}) error {
+// JAJ func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan struct{}) error {
+func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan struct{}, update bool) error {
 	m.m.Lock()
-	m.deleteCluster(cluster.ID)
+	// JAJ we need a way to return here but also come back later.
+	if update {
+		m.deleteCluster(cluster.ID)
+		m.m.Unlock()
+		log.Infof("JAJ returning nil ")
+		return nil
+	}
+	// JAJ - if 2 step update desired comment out the next line.
+	// JAJ - if 1 step update desired remove comments
+	// m.deleteCluster(cluster.ID)
+	log.Infof("JAJ going to add")
 	kubeController, kubeRegistry, options, configCluster, err := m.addCluster(cluster)
 	if err != nil {
 		m.m.Unlock()
@@ -383,9 +394,12 @@ func (m *Multicluster) deleteCluster(clusterID cluster.ID) {
 	if kc.workloadEntryController != nil {
 		m.opts.MeshServiceController.DeleteRegistry(clusterID, provider.External)
 	}
+	log.Debugf("JAJ skipping the Cleanup for testing")
+	/* JAJ skip Cleanup for now
 	if err := kc.Cleanup(); err != nil {
 		log.Warnf("failed cleaning up services in %s: %v", clusterID, err)
 	}
+	*/
 	delete(m.remoteKubeControllers, clusterID)
 }
 

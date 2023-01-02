@@ -15,7 +15,6 @@
 package multicluster
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -81,7 +80,7 @@ var (
 
 type ClusterHandler interface {
 	ClusterAdded(cluster *Cluster, stop <-chan struct{}) error
-	ClusterUpdated(cluster *Cluster, stop <-chan struct{}) error
+	ClusterUpdated(cluster *Cluster, stop <-chan struct{}, update bool) error
 	ClusterDeleted(clusterID cluster.ID) error
 }
 
@@ -359,23 +358,42 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 			continue
 		}
 
-		action, callback := "Adding", c.handleAdd
+		// JAJ action, callback := "Adding", c.handleAdd
+		action := "Adding"
 		if prev := c.cs.Get(secretKey, cluster.ID(clusterID)); prev != nil {
-			action, callback = "Updating", c.handleUpdate
+			action = "Updating"
+			// JAJ action, callback = "Updating", c.handleUpdate
+			logger.Infof("JAJ found a prev going to stop and delete handlers)")
 			// clusterID must be unique even across multiple secrets
+			/* JAJ
 			kubeConfigSha := sha256.Sum256(kubeConfig)
 			if bytes.Equal(kubeConfigSha[:], prev.kubeConfigSha[:]) {
 				logger.Infof("skipping update (kubeconfig are identical)")
 				continue
 			}
 			// stop previous remote cluster
-			prev.Stop()
+
+			*/
+			if prev.Closed() {
+				c.handleUpdate(prev, prev.stop, false)
+				logger.Infof("JAJ prev already closed)")
+			} else {
+				logger.Infof("JAJ prev not closed stopping and deleting handlers)")
+				prev.Stop()
+				c.handleUpdate(prev, prev.stop, false)
+				/* JAJ uncomment for 2 step update
+				   comment for 1 step
+				*/
+				c.handleUpdate(prev, prev.stop, true)
+				continue
+			}
+
 		} else if c.cs.Contains(cluster.ID(clusterID)) {
 			// if the cluster has been registered before by another secret, ignore the new one.
 			logger.Warnf("cluster has already been registered")
 			continue
 		}
-		logger.Infof("%s cluster", action)
+		logger.Infof("JAJ %s cluster", action)
 
 		remoteCluster, err := c.createRemoteCluster(kubeConfig, clusterID)
 		if err != nil {
@@ -383,7 +401,7 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 			errs = multierror.Append(errs, err)
 			continue
 		}
-		if err := callback(remoteCluster, remoteCluster.stop); err != nil {
+		if err := c.handleAdd(remoteCluster, remoteCluster.stop); err != nil {
 			remoteCluster.Stop()
 			logger.Errorf("%s cluster: initialize cluster failed: %v", action, err)
 			c.cs.Delete(secretKey, remoteCluster.ID)
@@ -443,10 +461,10 @@ func (c *Controller) handleAdd(cluster *Cluster, stop <-chan struct{}) error {
 	return errs.ErrorOrNil()
 }
 
-func (c *Controller) handleUpdate(cluster *Cluster, stop <-chan struct{}) error {
+func (c *Controller) handleUpdate(cluster *Cluster, stop <-chan struct{}, update bool) error {
 	var errs *multierror.Error
 	for _, handler := range c.handlers {
-		errs = multierror.Append(errs, handler.ClusterUpdated(cluster, stop))
+		errs = multierror.Append(errs, handler.ClusterUpdated(cluster, stop, update))
 	}
 	return errs.ErrorOrNil()
 }

@@ -53,6 +53,7 @@ func newEndpointsController(c *Controller) *endpointsController {
 
 func (e *endpointsController) GetProxyServiceInstances(c *Controller, proxy *model.Proxy) []*model.ServiceInstance {
 	eps, err := listerv1.NewEndpointsLister(e.informer.GetIndexer()).Endpoints(proxy.Metadata.Namespace).List(klabels.Everything())
+	log.Debugf("JAJ getProxyServiceInstance")
 	if err != nil {
 		log.Errorf("Get endpoints by index failed: %v", err)
 		return nil

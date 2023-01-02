@@ -104,6 +104,7 @@ func (s *DiscoveryServer) pushXds(con *Connection, w *model.WatchedResource, req
 	// Note: we do not need to account for unsubscribed resources as these are handled by parent removal;
 	// See https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol#deleting-resources.
 	// This means if there are only removals, we will not respond.
+	log.Debugf("JAJ pushing Xds and generating")
 	var logFiltered string
 	if !req.Delta.IsEmpty() && features.PartialFullPushes &&
 		!con.proxy.IsProxylessGrpc() {

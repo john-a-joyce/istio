@@ -447,7 +447,7 @@ func (s *DiscoveryServer) shouldRespond(con *Connection, request *discovery.Disc
 			return true, emptyResourceDelta
 		}
 
-		log.Debugf("ADS:%s: ACK %s %s %s", stype, con.conID, request.VersionInfo, request.ResponseNonce)
+		//JAJ log.Debugf("ADS:%s: ACK %s %s %s", stype, con.conID, request.VersionInfo, request.ResponseNonce)
 		return false, emptyResourceDelta
 	}
 	log.Debugf("ADS:%s: RESOURCE CHANGE added %v removed %v %s %s %s", stype,

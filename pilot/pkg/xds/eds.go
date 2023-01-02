@@ -88,6 +88,7 @@ func (s *DiscoveryServer) UpdateServiceShards(push *model.PushContext) error {
 func (s *DiscoveryServer) SvcUpdate(shard model.ShardKey, hostname string, namespace string, event model.Event) {
 	// When a service deleted, we should cleanup the endpoint shards and also remove keys from EndpointIndex to
 	// prevent memory leaks.
+	// oldservices := s.Env.ServiceDiscovery.Services()
 	if event == model.EventDelete {
 		inboundServiceDeletes.Increment()
 		s.Env.EndpointIndex.DeleteServiceShard(shard, hostname, namespace, false)
@@ -160,45 +161,65 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 	ep.Lock()
 	defer ep.Unlock()
 	newIstioEndpoints := istioEndpoints
-	if features.SendUnhealthyEndpoints.Load() {
-		oldIstioEndpoints := ep.Shards[shard]
-		newIstioEndpoints = make([]*model.IstioEndpoint, 0, len(istioEndpoints))
+	//JAJ if features.SendUnhealthyEndpoints.Load() {
+	//JAJ Since we come down here can we get old endpoints
+	oldIstioEndpoints := ep.Shards[shard]
+	log.Debugf("JAJ shard name %v", shard)
+	// JAJ since this is a new environment on the sync probably not any old endpoints.
 
-		// Check if new Endpoints are ready to be pushed. This check
-		// will ensure that if a new pod comes with a non ready endpoint,
-		// we do not unnecessarily push that config to Envoy.
-		// Please note that address is not a unique key. So this may not accurately
-		// identify based on health status and push too many times - which is ok since its an optimization.
-		emap := make(map[string]*model.IstioEndpoint, len(oldIstioEndpoints))
-		nmap := make(map[string]*model.IstioEndpoint, len(newIstioEndpoints))
-		// Add new endpoints only if they are ever ready once to shards
-		// so that full push does not send them from shards.
-		for _, oie := range oldIstioEndpoints {
-			emap[oie.Address] = oie
+	newIstioEndpoints = make([]*model.IstioEndpoint, 0, len(istioEndpoints))
+
+	// Check if new Endpoints are ready to be pushed. This check
+	// will ensure that if a new pod comes with a non ready endpoint,
+	// we do not unnecessarily push that config to Envoy.
+	// Please note that address is not a unique key. So this may not accurately
+	// identify based on health status and push too many times - which is ok since its an optimization.
+	emap := make(map[string]*model.IstioEndpoint, len(oldIstioEndpoints))
+	nmap := make(map[string]*model.IstioEndpoint, len(newIstioEndpoints))
+	// Add new endpoints only if they are ever ready once to shards
+	// so that full push does not send them from shards.
+	//JAJ - this code might be a pattern we can use to compare between the old and the new
+	// JAJ protected by a feature flag.
+	for _, oie := range oldIstioEndpoints {
+		emap[oie.Address] = oie
+	}
+	for _, nie := range istioEndpoints {
+		nmap[nie.Address] = nie
+	}
+	needPush := false
+	for _, nie := range istioEndpoints {
+		if nie.Namespace == "sample" {
+			log.Debugf("JAJ loop len of oldIstioEndpoints %s", len(oldIstioEndpoints))
+			log.Debugf("JAJ loop len of newIstioEndpoints %s", len(istioEndpoints))
+			log.Debugf("JAJ new endpoint %s ip = %s", nie.WorkloadName, nie.Address)
 		}
-		for _, nie := range istioEndpoints {
-			nmap[nie.Address] = nie
-		}
-		needPush := false
-		for _, nie := range istioEndpoints {
-			if oie, exists := emap[nie.Address]; exists {
-				// If endpoint exists already, we should push if it's health status changes.
-				if oie.HealthStatus != nie.HealthStatus {
-					needPush = true
-				}
-				newIstioEndpoints = append(newIstioEndpoints, nie)
-			} else if nie.HealthStatus == model.Healthy {
-				// If the endpoint does not exist in shards that means it is a
-				// new endpoint. Only send if it is healthy to avoid pushing endpoints
-				// that are not ready to start with.
-				needPush = true
-				newIstioEndpoints = append(newIstioEndpoints, nie)
+		if oie, exists := emap[nie.Address]; exists {
+			// If endpoint exists already, we should push if it's health status changes.
+			if nie.Namespace == "sample" {
+				log.Debugf("JAJ existing endpoint %s ip = %s", nie.WorkloadName, nie.Address)
 			}
+			if oie.HealthStatus != nie.HealthStatus {
+				needPush = true
+			}
+			newIstioEndpoints = append(newIstioEndpoints, nie)
+			// JAJ 		} else if nie.HealthStatus == model.Healthy {
+		} else {
+
+			// If the endpoint does not exist in shards that means it is a
+			// new endpoint. Only send if it is healthy to avoid pushing endpoints
+			// that are not ready to start with.
+			needPush = true
+			newIstioEndpoints = append(newIstioEndpoints, nie)
 		}
+		// JAJ }
 		// Next, check for endpoints that were in old but no longer exist. If there are any, there is a
 		// removal so we need to push an update.
 		for _, oie := range oldIstioEndpoints {
+			if oie.Namespace == "sample" {
+				log.Debugf("JAJ existing endpoint %s ip = %s", oie.WorkloadName, oie.Address)
+			}
 			if _, f := nmap[oie.Address]; !f {
+				log.Debugf("JAJ need a push since old endpoints changed")
 				needPush = true
 			}
 		}
@@ -235,6 +256,7 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 }
 
 func (s *DiscoveryServer) RemoveShard(shardKey model.ShardKey) {
+	log.Debugf("JAJ removing shard shard key = %s", shardKey)
 	s.Env.EndpointIndex.DeleteShard(shardKey)
 }
 

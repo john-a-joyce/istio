@@ -315,6 +315,9 @@ type XDSUpdater interface {
 	// SvcUpdate is called when a service definition is updated/deleted.
 	SvcUpdate(shard ShardKey, hostname string, namespace string, event Event)
 
+	// SvcCheck is called when services may have been deleted after a controller update.
+	SvcCheck(shard ShardKey, services []*Service)
+
 	// ConfigUpdate is called to notify the XDS server of config updates and request a push.
 	// The requests may be collapsed and throttled.
 	ConfigUpdate(req *PushRequest)
@@ -1389,6 +1392,9 @@ func (ps *PushContext) updateContext(
 func (ps *PushContext) initServiceRegistry(env *Environment) error {
 	// Sort the services in order of creation.
 	allServices := SortServicesByCreationTime(env.Services())
+	//JAJ looks like it happens after one of the config updates
+	// via the informers
+	log.Debugf("JAJ initServiceRegistry, %v", allServices)
 	for _, s := range allServices {
 		svcKey := s.Key()
 		// Precache instances

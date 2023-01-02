@@ -194,7 +194,7 @@ func NewDiscoveryServer(env *model.Environment, instanceID string, clusterID clu
 		// clear the cache as endpoint shards are modified to avoid cache write race
 		out.Env.EndpointIndex.SetCache(out.Cache)
 	}
-
+	log.Debugf("JAJ New discovery server")
 	out.ConfigGenerator = core.NewConfigGenerator(out.Cache)
 
 	return out
@@ -297,6 +297,7 @@ func (s *DiscoveryServer) periodicRefreshMetrics(stopCh <-chan struct{}) {
 // dropCacheForRequest clears the cache in response to a push request
 func (s *DiscoveryServer) dropCacheForRequest(req *model.PushRequest) {
 	// If we don't know what updated, cannot safely cache. Clear the whole cache
+	log.Debugf("JAJ dropCacheForRequest")
 	if len(req.ConfigsUpdated) == 0 {
 		s.Cache.ClearAll()
 	} else {
@@ -364,6 +365,8 @@ func (s *DiscoveryServer) globalPushContext() *model.PushContext {
 func (s *DiscoveryServer) ConfigUpdate(req *model.PushRequest) {
 	inboundConfigUpdates.Increment()
 	s.InboundUpdates.Inc()
+	log.Debugf("JAJ Config update")
+	// JAJ should really try to figure out how the push channel is porcessed
 	s.pushChannel <- req
 }
 
@@ -391,6 +394,7 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts debounceO
 	free := true
 	freeCh := make(chan struct{}, 1)
 
+	// JAJ this looks the main starting point for the push requests.
 	push := func(req *model.PushRequest, debouncedEvents int, startDebounce time.Time) {
 		pushFn(req)
 		updateSent.Add(int64(debouncedEvents))

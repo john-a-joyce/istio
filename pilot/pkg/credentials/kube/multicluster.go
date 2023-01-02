@@ -52,7 +52,7 @@ func (m *Multicluster) ClusterAdded(cluster *multicluster.Cluster, _ <-chan stru
 	return nil
 }
 
-func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan struct{}) error {
+func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan struct{}, update bool) error {
 	sc := NewCredentialsController(cluster.Client, cluster.ID)
 	m.m.Lock()
 	defer m.m.Unlock()
