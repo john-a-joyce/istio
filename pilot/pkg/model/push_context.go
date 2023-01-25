@@ -1394,7 +1394,7 @@ func (ps *PushContext) initServiceRegistry(env *Environment) error {
 	allServices := SortServicesByCreationTime(env.Services())
 	//JAJ looks like it happens after one of the config updates
 	// via the informers
-	log.Debugf("JAJ initServiceRegistry, %v", allServices)
+	log.Debugf("JAJ initServiceRegistry")
 	for _, s := range allServices {
 		svcKey := s.Key()
 		// Precache instances

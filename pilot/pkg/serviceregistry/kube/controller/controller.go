@@ -270,6 +270,7 @@ type Controller struct {
 	beginSync *atomic.Bool
 	// initialSync is set to true after performing an initial in-order processing of all objects.
 	initialSync *atomic.Bool
+	updated     *atomic.Bool
 }
 
 // NewController creates a new Kubernetes controller
@@ -286,6 +287,7 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 		workloadInstancesIndex:     workloadinstances.NewIndex(),
 		beginSync:                  atomic.NewBool(false),
 		initialSync:                atomic.NewBool(false),
+		updated:                    atomic.NewBool(false),
 
 		multinetwork: initMultinetwork(),
 	}
@@ -506,17 +508,32 @@ func (c *Controller) Cleanup() error {
 	return nil
 }
 
-func (c *Controller) checkOldServices(Services []*v1.Service) {
+func (c *Controller) checkOldServices(services []any) {
 	// c.opts.XDSUpdater.SvcCheck(services)
 	// JAJ c.checkOldServices(services)
 	// var svcConv *model.Service
 	// var newServices []*model.Service
-	newServices := make([]*model.Service, 0, len(Services))
-	for _, s := range services {
-		svcConv := kube.ConvertService(*s, c.opts.DomainSuffix, c.Cluster())
-		newServices = append(newServices, svcConv)
+	log.Debugf("JAJ checkOldService len of Services ", len(services))
+	newServices := make([]*model.Service, 0, len(services))
+	for _, sInterface := range services {
+		s, err := extractService(sInterface)
+		if err != nil {
+			log.Debugf("JAJ old service not found don't append ")
+		} else {
+			svcConv := kube.ConvertService(*s, c.opts.DomainSuffix, c.Cluster())
+			newServices = append(newServices, svcConv)
+		}
 	}
-	//JAJ
+	c.opts.XDSUpdater.SvcCheck(model.ShardKeyFromRegistry(c), newServices)
+}
+
+func (c *Controller) checkOldEndpoints(Endpoints []any) {
+	// c.opts.XDSUpdater.SvcCheck(services)
+	// JAJ c.checkOldServices(services)
+	// var svcConv *model.Service
+	// var newServices []*model.Service
+	log.Debugf("JAJ checkOldService len of Services ", len(Services))
+	newServices := make([]*model.Service, 0, len(Services))
 }
 
 func (c *Controller) onServiceEvent(curr any, event model.Event) error {
@@ -608,7 +625,8 @@ func (c *Controller) addOrUpdateService(svc *v1.Service, svcConv *model.Service,
 		}
 	}
 
-	// JAJ is the the equivalent svc call
+	// JAJ is the equivalent svc call
+	// c.opts.XDSUpdater.SvcCheck(shard, string(svcConv.Hostname), ns, event) // JAJ TODO Not here this is called per service
 	c.opts.XDSUpdater.SvcUpdate(shard, string(svcConv.Hostname), ns, event)
 
 	c.handlers.NotifyServiceHandlers(svcConv, event)
@@ -751,6 +769,13 @@ func (c *Controller) HasSynced() bool {
 	return c.initialSync.Load()
 }
 
+/* JAJ not needed
+// IsUpdated returns true is this controller was updated
+func (c *Controller) IsUpdated() bool {
+	return c.initialSync.Load()
+}
+*/
+
 func (c *Controller) informersSynced() bool {
 	if (c.nsInformer != nil && !c.nsInformer.HasSynced()) ||
 		!c.serviceInformer.HasSynced() ||
@@ -770,6 +795,17 @@ func (c *Controller) informersSynced() bool {
 // Maybe just sync the cache and trigger one push at last.
 func (c *Controller) SyncAll() error {
 	// JAJ can we add some logic here
+	/*  After testing clearing the shard doesn't fix the issue.
+	if c.updated.Load() {
+		// clear the shard
+		// TODO confirm there is no race condition
+		log.Debugf("JAJ Update = true")
+		if c.opts.XDSUpdater != nil {
+			c.opts.XDSUpdater.RemoveShard(model.ShardKeyFromRegistry(c))
+		}
+	}
+
+	*/
 	c.beginSync.Store(true)
 	var err *multierror.Error
 	//log.Debugf("JAJ SYncing all %v", c.pods.podsByIP)
@@ -818,10 +854,17 @@ func (c *Controller) syncNodes() error {
 func (c *Controller) syncServices() error {
 	var err *multierror.Error
 	services, _ := c.serviceInformer.List(metav1.NamespaceAll)
-	log.Debugf("initializing %d services", len(services))
-	//JAJ c.opts.XDSUpdater.SvcCheck(services)
-	c.checkOldServices(services)
+	log.Debugf("JAJ initializing %d services", len(services))
+	// JAJ need a type conversion here to handle this call.
+	// if c.updated.Load() {
+	if c.updated.Load() {
+		// log.Debugf("JAJ services [0] %v", services[0])
+		// log.Debugf("JAJ services [0] %s", services[0])
+		// log.Debugf("JAJ what services [0] points to %v", &services[0])
+		c.checkOldServices(services)
+	}
 	for _, s := range services {
+		// log.Debugf("JAJ syncServices service name %v", s.hostname)
 		err = multierror.Append(err, c.onServiceEvent(s, model.EventAdd))
 	}
 	return err.ErrorOrNil()
@@ -831,6 +874,11 @@ func (c *Controller) syncPods() error {
 	var err *multierror.Error
 	pods, _ := c.pods.informer.List(metav1.NamespaceAll)
 	log.Debugf("initializing %d pods", len(pods))
+	/* JAJ
+	if c.updated.Load() {
+		c.checkOldPods(pods)
+	}
+	*/
 	for _, s := range pods {
 		err = multierror.Append(err, c.pods.onEvent(s, model.EventAdd))
 	}
@@ -842,6 +890,9 @@ func (c *Controller) syncEndpoints() error {
 	endpoints := c.endpoints.getInformer().GetIndexer().List()
 	// JAJ can we change this to be a delta in some way?
 	log.Debugf("initializing %d endpoints", len(endpoints))
+	if c.updated.Load() {
+		c.checkOldEndpoints(endpoints)
+	}
 	for _, s := range endpoints {
 		// this cache is a kube thing tmp := s.(cache.Config.List())
 		err = multierror.Append(err, c.endpoints.onEvent(s, model.EventAdd))

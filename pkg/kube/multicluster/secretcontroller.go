@@ -79,7 +79,7 @@ var (
 )
 
 type ClusterHandler interface {
-	ClusterAdded(cluster *Cluster, stop <-chan struct{}) error
+	ClusterAdded(cluster *Cluster, stop <-chan struct{}, update bool) error
 	ClusterUpdated(cluster *Cluster, stop <-chan struct{}, update bool) error
 	ClusterDeleted(clusterID cluster.ID) error
 }
@@ -170,7 +170,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) error {
 	// run handlers for the config cluster; do not store this *Cluster in the ClusterStore or give it a SyncTimeout
 	// this is done outside the goroutine, we should block other Run/startFuncs until this is registered
 	configCluster := &Cluster{Client: c.configClusterClient, ID: c.configClusterID}
-	if err := c.handleAdd(configCluster, stopCh); err != nil {
+	if err := c.handleAdd(configCluster, stopCh, false); err != nil {
 		return fmt.Errorf("failed initializing primary cluster %s: %v", c.configClusterID, err)
 	}
 	go func() {
@@ -360,8 +360,10 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 
 		// JAJ action, callback := "Adding", c.handleAdd
 		action := "Adding"
+		update := false
 		if prev := c.cs.Get(secretKey, cluster.ID(clusterID)); prev != nil {
-			action = "Updating"
+			update = true
+			// action = "Updating"
 			// JAJ action, callback = "Updating", c.handleUpdate
 			logger.Infof("JAJ found a prev going to stop and delete handlers)")
 			// clusterID must be unique even across multiple secrets
@@ -374,15 +376,15 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 			// stop previous remote cluster
 
 			*/
-			if prev.Closed() {
-				c.handleUpdate(prev, prev.stop, false)
-				logger.Infof("JAJ prev already closed)")
-			} else {
+			if !prev.Closed() {
+				//	c.handleUpdate(prev, prev.stop, update)
+				//	logger.Infof("JAJ prev already closed)")
+				// } else {
 				logger.Infof("JAJ prev not closed stopping and deleting handlers)")
 				prev.Stop()
+				/* JAJ uncomment for 1 step update
 				c.handleUpdate(prev, prev.stop, false)
-				/* JAJ uncomment for 2 step update
-				   comment for 1 step
+				   comment for 2 step
 				*/
 				c.handleUpdate(prev, prev.stop, true)
 				continue
@@ -401,7 +403,7 @@ func (c *Controller) addSecret(name types.NamespacedName, s *corev1.Secret) erro
 			errs = multierror.Append(errs, err)
 			continue
 		}
-		if err := c.handleAdd(remoteCluster, remoteCluster.stop); err != nil {
+		if err := c.handleAdd(remoteCluster, remoteCluster.stop, update); err != nil {
 			remoteCluster.Stop()
 			logger.Errorf("%s cluster: initialize cluster failed: %v", action, err)
 			c.cs.Delete(secretKey, remoteCluster.ID)
@@ -453,10 +455,10 @@ func (c *Controller) deleteCluster(secretKey string, clusterID cluster.ID) {
 	delete(c.cs.remoteClusters[secretKey], clusterID)
 }
 
-func (c *Controller) handleAdd(cluster *Cluster, stop <-chan struct{}) error {
+func (c *Controller) handleAdd(cluster *Cluster, stop <-chan struct{}, update bool) error {
 	var errs *multierror.Error
 	for _, handler := range c.handlers {
-		errs = multierror.Append(errs, handler.ClusterAdded(cluster, stop))
+		errs = multierror.Append(errs, handler.ClusterAdded(cluster, stop, update))
 	}
 	return errs.ErrorOrNil()
 }

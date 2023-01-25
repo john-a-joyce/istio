@@ -191,7 +191,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 			client.RunAndWait(stop)
 		}
 		registries = append(registries, k8s)
-		if err := creds.ClusterAdded(&multicluster.Cluster{ID: k8sCluster, Client: client}, nil); err != nil {
+		if err := creds.ClusterAdded(&multicluster.Cluster{ID: k8sCluster, Client: client}, nil, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -543,6 +543,7 @@ func (fx *FakeXdsUpdater) ProxyUpdate(c cluster.ID, p string) {
 		fx.Delegate.ProxyUpdate(c, p)
 	}
 }
+func (fx *FakeXdsUpdater) SvcCheck(_ model.ShardKey, _ []*model.Service) {}
 
 func (fx *FakeXdsUpdater) SvcUpdate(s model.ShardKey, hostname string, namespace string, e model.Event) {
 	fx.Events <- FakeXdsEvent{Kind: "svcupdate", Host: hostname, Namespace: namespace}

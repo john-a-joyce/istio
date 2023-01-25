@@ -297,11 +297,12 @@ func (s *DiscoveryServer) periodicRefreshMetrics(stopCh <-chan struct{}) {
 // dropCacheForRequest clears the cache in response to a push request
 func (s *DiscoveryServer) dropCacheForRequest(req *model.PushRequest) {
 	// If we don't know what updated, cannot safely cache. Clear the whole cache
-	log.Debugf("JAJ dropCacheForRequest")
 	if len(req.ConfigsUpdated) == 0 {
+		log.Debugf("JAJ dropCacheForRequest, clearing all")
 		s.Cache.ClearAll()
 	} else {
 		// Otherwise, just clear the updated configs
+		log.Debugf("JAJ dropCacheForRequest, clearing config")
 		s.Cache.Clear(req.ConfigsUpdated)
 	}
 }

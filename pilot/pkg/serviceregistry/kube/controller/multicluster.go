@@ -147,7 +147,7 @@ func (m *Multicluster) close() (err error) {
 // ClusterAdded is passed to the secret controller as a callback to be called
 // when a remote cluster is added.  This function needs to set up all the handlers
 // to watch for resources being added, deleted or changed on remote clusters.
-func (m *Multicluster) ClusterAdded(cluster *multicluster.Cluster, clusterStopCh <-chan struct{}) error {
+func (m *Multicluster) ClusterAdded(cluster *multicluster.Cluster, clusterStopCh <-chan struct{}, update bool) error {
 	m.m.Lock()
 	kubeController, kubeRegistry, options, configCluster, err := m.addCluster(cluster)
 	if err != nil {
@@ -156,6 +156,9 @@ func (m *Multicluster) ClusterAdded(cluster *multicluster.Cluster, clusterStopCh
 	}
 	m.m.Unlock()
 	// clusterStopCh is a channel that will be closed when this cluster removed.
+	if update {
+		kubeController.updated.Store(true)
+	}
 	return m.initializeCluster(cluster, kubeController, kubeRegistry, *options, configCluster, clusterStopCh)
 }
 
@@ -174,15 +177,20 @@ func (m *Multicluster) ClusterUpdated(cluster *multicluster.Cluster, stop <-chan
 	// JAJ - if 2 step update desired comment out the next line.
 	// JAJ - if 1 step update desired remove comments
 	// m.deleteCluster(cluster.ID)
-	log.Infof("JAJ going to add")
-	kubeController, kubeRegistry, options, configCluster, err := m.addCluster(cluster)
-	if err != nil {
-		m.m.Unlock()
-		return err
-	}
+	log.Infof("JAJ going to add  should not get here")
+	/*
+		kubeController, kubeRegistry, options, configCluster, err := m.addCluster(cluster)
+		if err != nil {
+			m.m.Unlock()
+			return err
+		}
+	*/
 	m.m.Unlock()
+	// JAJ TODO - need to cleanup the old controller and informer resources.
+	return nil
 	// clusterStopCh is a channel that will be closed when this cluster removed.
-	return m.initializeCluster(cluster, kubeController, kubeRegistry, *options, configCluster, stop)
+	// kubeController.updated.Store(true)
+	// return m.initializeCluster(cluster, kubeController, kubeRegistry, *options, configCluster, stop)
 }
 
 // ClusterDeleted is passed to the secret controller as a callback to be called
@@ -395,6 +403,7 @@ func (m *Multicluster) deleteCluster(clusterID cluster.ID) {
 		m.opts.MeshServiceController.DeleteRegistry(clusterID, provider.External)
 	}
 	log.Debugf("JAJ skipping the Cleanup for testing")
+	// JAJ TODO for the update case we need to delete the things hanging on the old controller
 	/* JAJ skip Cleanup for now
 	if err := kc.Cleanup(); err != nil {
 		log.Warnf("failed cleaning up services in %s: %v", clusterID, err)

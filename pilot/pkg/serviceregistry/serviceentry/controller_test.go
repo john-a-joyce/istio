@@ -104,6 +104,8 @@ func (fx *FakeXdsUpdater) ProxyUpdate(_ cluster.ID, ip string) {
 	fx.Events <- Event{kind: "xds", proxyIP: ip}
 }
 
+func (fx *FakeXdsUpdater) SvcCheck(_ model.ShardKey, _ []*model.Service) {}
+
 func (fx *FakeXdsUpdater) SvcUpdate(_ model.ShardKey, hostname string, namespace string, _ model.Event) {
 	fx.Events <- Event{kind: "svcupdate", host: hostname, namespace: namespace}
 }
